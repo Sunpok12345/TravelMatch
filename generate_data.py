@@ -158,6 +158,7 @@ for i, (name, province, category, tags, cost, days, review, desc) in enumerate(p
         "suggested_days": days,
         "review_score": review,
         "description": desc,
+        "image_url": "",  # <-- กรอกลิงก์รูปของสถานที่นี้เอง (เว้นว่างได้ถ้ายังไม่มี)
     })
 
 df = pd.DataFrame(rows)

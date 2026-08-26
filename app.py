@@ -37,6 +37,10 @@ TOP_N = 5                # ระบบแนะนำ Top 5
 
 DATA_PATH = "travel_data.csv"
 
+# วางลิงก์รูปแบนเนอร์ของคุณตรงนี้ (เช่น รูปจาก imgur, unsplash, หรือรูปที่อัปโหลดขึ้น GitHub แล้วก็อปลิงก์ raw มาวาง)
+# ถ้าไม่ต้องการแบนเนอร์ ให้ปล่อยเป็นสตริงว่าง ""
+BANNER_IMAGE_URL = ""
+
 
 # ----------------------------------------------------------------------
 # 1) Data Preparation (บทที่ 3.3 ข้อมูลที่ใช้ในระบบ)
@@ -54,6 +58,11 @@ def load_data(path: str = DATA_PATH) -> pd.DataFrame:
     df["suggested_days"] = df["suggested_days"].astype(float)
     df["review_score"] = df["review_score"].astype(float)
     df["interest_tags"] = df["interest_tags"].fillna("")
+
+    # คอลัมน์ image_url เป็นทางเลือก (ผู้ใช้กรอกลิงก์รูปเองทีหลังได้) ถ้ายังไม่มีคอลัมน์นี้เลย ให้เติมค่าว่างไว้ก่อน
+    if "image_url" not in df.columns:
+        df["image_url"] = ""
+    df["image_url"] = df["image_url"].fillna("")
 
     return df.reset_index(drop=True)
 
@@ -168,12 +177,19 @@ def recommend(df: pd.DataFrame, user_budget: float, user_days: float,
 # ----------------------------------------------------------------------
 def main():
     st.set_page_config(page_title="TravelMatch", page_icon="🧭", layout="wide")
-    # Custom background color
+
+    # Custom background color (main content + sidebar)
     st.markdown(
         """
         <style>
         .stApp {
-            background-color: ##63BF9E;
+            background-color: #C0E6ED;
+        }
+        section[data-testid="stSidebar"] {
+            background-color: #C0E6ED;
+        }
+        section[data-testid="stSidebar"] * {
+            color: #14343B !important;
         }
         </style>
         """,
@@ -181,6 +197,10 @@ def main():
     )
 
     st.title("🧭 TravelMatch")
+
+    if BANNER_IMAGE_URL:
+        st.image(BANNER_IMAGE_URL, use_container_width=True)
+
     st.caption("ระบบแนะนำสถานที่ท่องเที่ยวที่เหมาะสมกับงบประมาณ ระยะเวลา และความสนใจของผู้ใช้")
 
     df = load_data()
@@ -257,6 +277,8 @@ def main():
                 col1, col2 = st.columns([3, 1])
                 with col1:
                     st.markdown(f"### {i+1}. {row['place_name']} — {row['province']}")
+                    if row.get("image_url"):
+                        st.image(row["image_url"], use_container_width=True)
                     st.write(row["description"])
                     st.caption(f"หมวดหมู่: {row['category']} | tag: {row['interest_tags']}")
                     people = st.session_state.get("last_people", 1)
