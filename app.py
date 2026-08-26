@@ -183,10 +183,10 @@ def main():
         """
         <style>
         .stApp {
-            background-color: #C0E6ED;
+            background-color: #;
         }
         section[data-testid="stSidebar"] {
-            background-color: #C0E6ED;
+            background-color: #;
         }
         section[data-testid="stSidebar"] * {
             color: #14343B !important;
