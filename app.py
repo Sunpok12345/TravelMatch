@@ -173,7 +173,7 @@ def main():
         """
         <style>
         .stApp {
-            background-color: #FFFFFF;
+            background-color: ##63BF9E;
         }
         </style>
         """,
