@@ -20,7 +20,6 @@ TravelMatch - ระบบแนะนำสถานที่ท่องเท
     pip install streamlit pandas numpy
     streamlit run app.py
 """
-
 import pandas as pd
 import numpy as np
 import streamlit as st
@@ -132,7 +131,9 @@ def calculate_score(row: pd.Series, user_budget: float, user_days: float,
         + WEIGHT_BUDGET * budget_s
         + WEIGHT_DURATION * duration_s
         + WEIGHT_REVIEW * review_s
-    ) * 100  # แปลงเป็นคะแนนเต็ม 100 เพื่อให้แสดงผลเข้าใจง่าย
+    ) * 100  # แปลงเป็นคะแนนเต็ม 100 เพื่อให้แสดงผลเข้าใจง่าย #
+    #คะแนนรวม = (ความสนใจ × 40%) + (งบประมาณ × 30%) + (ระยะเวลา × 20%) + (รีวิว × 10%)
+
 
     return pd.Series({
         "interest_score": round(interest_s * 100, 1),
