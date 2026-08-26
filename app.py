@@ -168,6 +168,17 @@ def recommend(df: pd.DataFrame, user_budget: float, user_days: float,
 # ----------------------------------------------------------------------
 def main():
     st.set_page_config(page_title="TravelMatch", page_icon="🧭", layout="wide")
+    # Custom background color
+    st.markdown(
+        """
+        <style>
+        .stApp {
+            background-color: #C0E6ED;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
 
     st.title("🧭 TravelMatch")
     st.caption("ระบบแนะนำสถานที่ท่องเที่ยวที่เหมาะสมกับงบประมาณ ระยะเวลา และความสนใจของผู้ใช้")
