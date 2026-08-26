@@ -39,7 +39,9 @@ DATA_PATH = "travel_data.csv"
 
 # วางลิงก์รูปแบนเนอร์ของคุณตรงนี้ (เช่น รูปจาก imgur, unsplash, หรือรูปที่อัปโหลดขึ้น GitHub แล้วก็อปลิงก์ raw มาวาง)
 # ถ้าไม่ต้องการแบนเนอร์ ให้ปล่อยเป็นสตริงว่าง ""
-BANNER_IMAGE_URL = ""
+BANNER_IMAGE_URL = "Miniproject 
+
+https://www.facebook.com/loveandaman/posts/%E0%B8%97%E0%B8%B0%E0%B9%80%E0%B8%A5%E0%B8%AA%E0%B8%A7%E0%B8%A2%E0%B9%86%E0%B9%81%E0%B8%9A%E0%B8%9A%E0%B8%99%E0%B8%B5%E0%B9%89-%E0%B8%A3%E0%B8%AD%E0%B9%80%E0%B8%9E%E0%B8%B7%E0%B9%88%E0%B8%AD%E0%B8%99%E0%B9%86%E0%B8%AD%E0%B8%A2%E0%B8%B9%E0%B9%88%E0%B8%99%E0%B8%B0-%E0%B8%AB%E0%B8%A1%E0%B8%B9%E0%B9%88%E0%B9%80%E0%B8%81%E0%B8%B2%E0%B8%B0%E0%B8%AA%E0%B8%B4%E0%B8%A1%E0%B8%B4%E0%B8%A5%E0%B8%B1%E0%B8%99-%E0%B8%99%E0%B9%89%E0%B8%B3%E0%B8%97%E0%B8%B0%E0%B9%80%E0%B8%A5%E0%B8%AA%E0%B8%B5%E0%B8%9F%E0%B9%89%E0%B8%B2%E0%B8%84%E0%B8%A3%E0%B8%B4%E0%B8%AA%E0%B8%95%E0%B8%B1%E0%B8%A5-%E0%B8%AB%E0%B8%B2%E0%B8%94%E0%B8%97%E0%B8%A3%E0%B8%B2%E0%B8%A2%E0%B8%82%E0%B8%B2%E0%B8%A7%E0%B8%A5%E0%B8%B0%E0%B9%80/960733169427707/"
 
 
 # ----------------------------------------------------------------------
