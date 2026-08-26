@@ -189,7 +189,7 @@ def main():
             background-color: #;
         }
         section[data-testid="stSidebar"] * {
-            color: #14343B !important;
+            color: # !important;
         }
         </style>
         """,
