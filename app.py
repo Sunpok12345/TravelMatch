@@ -200,6 +200,9 @@ def main():
         user_days = st.number_input(
             "ระยะเวลาที่มี (วัน)", min_value=1, max_value=10, value=2, step=1
         )
+        user_people = st.number_input(
+            "👥 จำนวนคน (ผู้ร่วมเดินทาง)", min_value=1, max_value=20, value=2, step=1
+        )
         user_interests = st.multiselect(
             "ความสนใจ (เลือกได้หลายข้อ)",
             options=all_tags,
@@ -221,6 +224,7 @@ def main():
             filtered_df = filter_by_province(df, user_provinces)
             st.session_state["last_result"] = recommend(filtered_df, user_budget, user_days, user_interests)
             st.session_state["last_provinces"] = user_provinces
+            st.session_state["last_people"] = user_people
 
         result = st.session_state["last_result"]
 
@@ -244,8 +248,11 @@ def main():
                     st.markdown(f"### {i+1}. {row['place_name']} — {row['province']}")
                     st.write(row["description"])
                     st.caption(f"หมวดหมู่: {row['category']} | tag: {row['interest_tags']}")
+                    people = st.session_state.get("last_people", 1)
+                    total_cost = row["cost_per_person"] * people
                     st.write(
                         f"💰 ค่าใช้จ่ายโดยประมาณ: {row['cost_per_person']:,.0f} บาท/คน  |  "
+                        f"👥 {people} คน รวม **{total_cost:,.0f} บาท**  |  "
                         f"🗓️ ระยะเวลาแนะนำ: {row['suggested_days']:.0f} วัน  |  "
                         f"⭐ รีวิว: {row['review_score']:.1f}/5"
                     )
@@ -264,9 +271,13 @@ def main():
                     st.dataframe(score_detail, hide_index=True, use_container_width=True)
 
         with st.expander("📊 ดูตารางคะแนนทั้งหมด (สำหรับอ้างอิงในบทที่ 4)"):
+            people = st.session_state.get("last_people", 1)
+            table = result.copy()
+            table["total_cost_group"] = table["cost_per_person"] * people
             st.dataframe(
-                result[[
+                table[[
                     "place_id", "place_name", "province", "category",
+                    "cost_per_person", "total_cost_group",
                     "interest_score", "budget_score", "duration_score",
                     "review_score_norm", "total_score",
                 ]],
