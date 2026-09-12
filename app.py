@@ -1,448 +1,325 @@
-# -*- coding: utf-8 -*-
 """
-TravelMatch 🧭 (Realtime Edition — ตรงตามรายงานบทที่ 3-4)
+TravelMatch - ระบบแนะนำสถานที่ท่องเที่ยวที่เหมาะสมกับงบประมาณ ระยะเวลา และความสนใจของผู้ใช้
 
-ระบบแนะนำสถานที่ท่องเที่ยวที่เหมาะสมกับงบประมาณ ระยะเวลา และความสนใจของผู้ใช้
-ดึงข้อมูลสถานที่จริงแบบเรียลไทม์จาก OpenStreetMap (Overpass API) แทนไฟล์ CSV คงที่
+โครงสร้างของไฟล์นี้ถูกออกแบบให้ "ตรงกับรายงาน" ตามตาราง Mapping ในภาคผนวก:
 
-โครงสร้างอ้างอิงจากรายงาน:
-- 3.3 ข้อมูลที่ใช้ในระบบ (ข้อมูลผู้ใช้ / ข้อมูลสถานที่ท่องเที่ยว)
-- 3.5 การคำนวณคะแนน (Weighted Scoring: ความสนใจ 40% / งบประมาณ 30% / ระยะเวลา 20% / รีวิว 10%)
-- 3.6 การออกแบบหน้าจอ (4 หน้าจอ: หน้าแรก / กรอกข้อมูล / ผลการแนะนำ / รายละเอียด)
+    ในรายงาน                      ในโปรแกรม (ไฟล์นี้)
+    -------------------------     ------------------------------
+    Dataset                       travel_data.csv
+    Data Preparation              pandas (load_data)
+    ปัจจัยความสนใจ      40%       calculate_interest_score()
+    ปัจจัยงบประมาณ      30%       calculate_budget_score()
+    ปัจจัยระยะเวลา      20%       calculate_duration_score()
+    คะแนนรีวิว           10%       calculate_review_score()
+    Weighted Scoring              calculate_score()
+    Ranking                       sort_values()
+    ระบบแนะนำ                     Top 5
+    Application                   Streamlit (ไฟล์นี้ทั้งไฟล์)
 
-หมายเหตุสำคัญ: ปัจจัยที่ "ถ่วงน้ำหนัก" ในการคำนวณคะแนนมีแค่ 4 ปัจจัยตามรายงาน (3.5)
-ส่วนข้อมูลอื่น เช่น รูปแบบการเดินทาง / กิจกรรม / ฤดูกาล / จำนวนผู้เดินทาง
-ใช้เป็น "ข้อมูลประกอบการตัดสินใจ" และเหตุผลประกอบการแนะนำเท่านั้น ไม่ได้เข้าสูตรคะแนนรวม
-เนื่องจาก OSM ไม่มีข้อมูลเหล่านี้ตรงๆ จึงประมาณจากประเภทสถานที่ (ระบุไว้ในคอมเมนต์ทุกจุด)
+วิธีรัน:
+    pip install streamlit pandas numpy
+    streamlit run app.py
 """
-
-import math
-import requests
 import pandas as pd
+import numpy as np
 import streamlit as st
 
-# ----------------------------------------------------------------------------
-# ค่าคงที่ / การตั้งค่า
-# ----------------------------------------------------------------------------
+# ----------------------------------------------------------------------
+# ค่าคงที่ของน้ำหนักปัจจัย (ต้องตรงกับที่ระบุในบทที่ 3 ของรายงานเป๊ะๆ)
+# ----------------------------------------------------------------------
+WEIGHT_INTEREST = 0.40   # ปัจจัยความสนใจ 40%
+WEIGHT_BUDGET = 0.30     # ปัจจัยงบประมาณ 30%
+WEIGHT_DURATION = 0.20   # ปัจจัยระยะเวลา 20%
+WEIGHT_REVIEW = 0.10     # คะแนนรีวิว 10%
 
-TOP_N = 5
+TOP_N = 5                # ระบบแนะนำ Top 5
 
-NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
-OVERPASS_URL = "https://overpass-api.de/api/interpreter"
-HEADERS = {"User-Agent": "TravelMatchApp/1.0 (educational project)"}
+DATA_PATH = "travel_data.csv"
 
-# ประเภทสถานที่ที่สนใจ -> OSM tag (key, value) ที่จะค้นหา
-INTEREST_TAG_MAP = {
-    "ประวัติศาสตร์ / วัฒนธรรม": [("historic", None), ("tourism", "museum"), ("tourism", "attraction")],
-    "ธรรมชาติ": [("natural", None), ("leisure", "park"), ("tourism", "viewpoint")],
-    "ทะเล / ชายหาด": [("natural", "beach")],
-    "ช้อปปิ้ง / ไลฟ์สไตล์": [("shop", "mall")],
-    "วัด / ศาสนสถาน": [("amenity", "place_of_worship")],
-    "สวนสนุก / กิจกรรม": [("tourism", "theme_park"), ("leisure", "water_park"), ("tourism", "zoo")],
-}
-
-# รูปแบบการเดินทาง (ข้อมูลผู้ใช้ตามรายงาน 3.3) — ใช้เป็นเหตุผลประกอบ ไม่เข้าสูตรคะแนน
-TRAVEL_STYLE_OPTIONS = ["พักผ่อน", "ผจญภัย", "ครอบครัว", "ถ่ายภาพ"]
-
-# กิจกรรมที่ต้องการ (ข้อมูลผู้ใช้ตามรายงาน 3.3) — ใช้เป็นเหตุผลประกอบ ไม่เข้าสูตรคะแนน
-ACTIVITY_OPTIONS = ["เดินป่า/เดินเล่น", "ถ่ายภาพ", "ปิกนิก", "ช้อปปิ้ง", "ชมวัฒนธรรม", "เล่นน้ำ", "เครื่องเล่น/ผจญภัย"]
-
-# ---- ค่าประมาณตามประเภทสถานที่ (fallback เมื่อ OSM ไม่มีข้อมูลตรงๆ) ----
-
-DEFAULT_COST_BY_TYPE = {
-    "museum": 150, "attraction": 100, "viewpoint": 0, "park": 0, "beach": 0,
-    "theme_park": 500, "water_park": 400, "zoo": 250, "place_of_worship": 0,
-    "mall": 0, "historic": 50, "natural": 0, "default": 100,
-}
-
-DEFAULT_DURATION_BY_TYPE = {  # ชั่วโมง
-    "museum": 2.0, "attraction": 1.5, "viewpoint": 0.5, "park": 1.5, "beach": 2.5,
-    "theme_park": 4.0, "water_park": 3.0, "zoo": 3.0, "place_of_worship": 1.0,
-    "mall": 2.0, "historic": 1.0, "natural": 1.5, "default": 1.5,
-}
-
-ACTIVITY_BY_TYPE = {
-    "museum": ["ชมวัฒนธรรม", "ถ่ายภาพ"], "attraction": ["ถ่ายภาพ"], "viewpoint": ["ถ่ายภาพ", "เดินป่า/เดินเล่น"],
-    "park": ["เดินป่า/เดินเล่น", "ปิกนิก"], "beach": ["เล่นน้ำ", "ถ่ายภาพ"],
-    "theme_park": ["เครื่องเล่น/ผจญภัย"], "water_park": ["เล่นน้ำ", "เครื่องเล่น/ผจญภัย"],
-    "zoo": ["เครื่องเล่น/ผจญภัย", "ถ่ายภาพ"], "place_of_worship": ["ชมวัฒนธรรม"],
-    "mall": ["ช้อปปิ้ง"], "historic": ["ชมวัฒนธรรม", "ถ่ายภาพ"], "natural": ["เดินป่า/เดินเล่น", "ถ่ายภาพ"],
-    "default": ["ถ่ายภาพ"],
-}
-
-SEASON_BY_TYPE = {
-    "beach": "หน้าร้อน (พ.ย. - เม.ย.) เหมาะที่สุด", "natural": "หน้าหนาว - หน้าร้อน อากาศเย็นสบาย",
-    "park": "ตลอดปี (เลี่ยงช่วงฝนตกหนัก)", "viewpoint": "หน้าหนาวจะเห็นวิวชัดที่สุด",
-    "water_park": "หน้าร้อนเหมาะที่สุด", "theme_park": "ตลอดปี", "zoo": "ตลอดปี",
-    "default": "ตลอดปี",
-}
-
-TRAVEL_STYLE_BY_TYPE = {
-    "museum": ["ครอบครัว", "พักผ่อน"], "attraction": ["พักผ่อน", "ถ่ายภาพ"],
-    "viewpoint": ["ถ่ายภาพ", "พักผ่อน"], "park": ["พักผ่อน", "ครอบครัว"],
-    "beach": ["พักผ่อน", "ถ่ายภาพ"], "theme_park": ["ครอบครัว", "ผจญภัย"],
-    "water_park": ["ครอบครัว", "ผจญภัย"], "zoo": ["ครอบครัว"],
-    "place_of_worship": ["ครอบครัว", "พักผ่อน"], "mall": ["ครอบครัว", "พักผ่อน"],
-    "historic": ["ถ่ายภาพ", "ครอบครัว"], "natural": ["ผจญภัย", "ถ่ายภาพ"],
-    "default": ["พักผ่อน"],
-}
+# วางลิงก์รูปแบนเนอร์ของคุณตรงนี้ (เช่น รูปจาก imgur, unsplash, หรือรูปที่อัปโหลดขึ้น GitHub แล้วก็อปลิงก์ raw มาวาง)
+# ถ้าไม่ต้องการแบนเนอร์ ให้ปล่อยเป็นสตริงว่าง ""
+BANNER_IMAGE_URL = "https://i.pinimg.com/736x/4e/7b/01/4e7b01b29b205dceaf008fe80440e226.jpg"
 
 
-# ----------------------------------------------------------------------------
-# Geocoding: แปลงชื่อจังหวัด/พื้นที่ เป็นพิกัด
-# ----------------------------------------------------------------------------
+# ----------------------------------------------------------------------
+# 1) Data Preparation (บทที่ 3.3 ข้อมูลที่ใช้ในระบบ)
+#    ใช้ Pandas อ่านและตรวจสอบข้อมูลเบื้องต้น (missing value, dtype)
+# ----------------------------------------------------------------------
+@st.cache_data
+def load_data(path: str = DATA_PATH) -> pd.DataFrame:
+    df = pd.read_csv(path)
 
-@st.cache_data(ttl=86400, show_spinner=False)
-def geocode_location(place_name: str):
-    params = {"q": place_name, "format": "json", "limit": 1}
-    resp = requests.get(NOMINATIM_URL, params=params, headers=HEADERS, timeout=15)
-    resp.raise_for_status()
-    results = resp.json()
-    if not results:
-        return None
-    return float(results[0]["lat"]), float(results[0]["lon"])
+    # ตรวจสอบและจัดการค่าว่าง (Data Cleaning ตามหลักวิทยาการข้อมูล)
+    df = df.dropna(subset=["place_name", "cost_per_person", "suggested_days", "review_score"])
 
+    # แปลงชนิดข้อมูลให้ถูกต้อง
+    df["cost_per_person"] = df["cost_per_person"].astype(float)
+    df["suggested_days"] = df["suggested_days"].astype(float)
+    df["review_score"] = df["review_score"].astype(float)
+    df["interest_tags"] = df["interest_tags"].fillna("")
 
-def haversine_km(lat1, lon1, lat2, lon2):
-    r = 6371.0
-    p1, p2 = math.radians(lat1), math.radians(lat2)
-    dphi = math.radians(lat2 - lat1)
-    dlmb = math.radians(lon2 - lon1)
-    a = math.sin(dphi / 2) ** 2 + math.cos(p1) * math.cos(p2) * math.sin(dlmb / 2) ** 2
-    return 2 * r * math.asin(math.sqrt(a))
+    # คอลัมน์ image_url เป็นทางเลือก (ผู้ใช้กรอกลิงก์รูปเองทีหลังได้) ถ้ายังไม่มีคอลัมน์นี้เลย ให้เติมค่าว่างไว้ก่อน
+    if "image_url" not in df.columns:
+        df["image_url"] = ""
+    df["image_url"] = df["image_url"].fillna("")
 
-
-# ----------------------------------------------------------------------------
-# ส่วนจัดการข้อมูล: ดึงข้อมูลสถานที่ท่องเที่ยวแบบเรียลไทม์จาก Overpass API (แทนไฟล์ CSV)
-# ----------------------------------------------------------------------------
-
-def _build_overpass_query(lat, lon, radius_m, tag_pairs):
-    clauses = []
-    for key, value in tag_pairs:
-        if value:
-            clauses.append(f'node["{key}"="{value}"](around:{radius_m},{lat},{lon});')
-        else:
-            clauses.append(f'node["{key}"](around:{radius_m},{lat},{lon});')
-    body = "\n".join(clauses)
-    return f"[out:json][timeout:25];\n(\n{body}\n);\nout body;"
+    return df.reset_index(drop=True)
 
 
-@st.cache_data(ttl=1800, show_spinner=False)
-def load_data(lat: float, lon: float, radius_km: float, selected_interests: list):
-    """ส่วนจัดการข้อมูล (3.8 ข้อ 2): ดึงข้อมูลสถานที่ท่องเที่ยวจริงจาก OSM แทนการอ่านไฟล์ CSV"""
-    tag_pairs = []
-    categories = selected_interests if selected_interests else list(INTEREST_TAG_MAP.keys())
-    for cat in categories:
-        tag_pairs.extend(INTEREST_TAG_MAP.get(cat, []))
-    tag_pairs = list(dict.fromkeys(tag_pairs))
+# ----------------------------------------------------------------------
+# 2) ฟังก์ชันคำนวณคะแนนรายปัจจัย (แต่ละฟังก์ชัน normalize ผลลัพธ์ให้อยู่ในช่วง 0-1)
+# ----------------------------------------------------------------------
+def calculate_interest_score(place_tags: str, user_interests: list[str]) -> float:
+    """
+    ปัจจัยความสนใจ: สัดส่วนของความสนใจที่ผู้ใช้เลือก ซึ่งตรงกับ tag ของสถานที่
+    เช่น ผู้ใช้เลือก 3 อย่าง ตรงกับสถานที่ 2 อย่าง -> คะแนน = 2/3
+    """
+    if not user_interests:
+        return 0.5  # ผู้ใช้ไม่ระบุความสนใจ ให้คะแนนกลางๆ ทุกสถานที่เท่ากัน
 
-    query = _build_overpass_query(lat, lon, int(radius_km * 1000), tag_pairs)
-
-    try:
-        resp = requests.post(OVERPASS_URL, data={"data": query}, headers=HEADERS, timeout=30)
-        resp.raise_for_status()
-        data = resp.json()
-    except Exception as e:
-        st.error(f"ดึงข้อมูลจาก OpenStreetMap ไม่สำเร็จ: {e}")
-        return pd.DataFrame()
-
-    rows = []
-    for el in data.get("elements", []):
-        tags = el.get("tags", {})
-        name = tags.get("name")
-        if not name:
-            continue
-
-        place_type = (
-            tags.get("tourism") or tags.get("historic") or tags.get("natural")
-            or tags.get("leisure") or tags.get("shop") or tags.get("amenity") or "default"
-        )
-
-        matched_interests = [
-            cat for cat, pairs in INTEREST_TAG_MAP.items()
-            if any((k in tags and (v is None or tags.get(k) == v)) for k, v in pairs)
-        ]
-
-        province = tags.get("addr:province") or tags.get("addr:city") or tags.get("addr:state") or "ไม่ระบุ"
-
-        fee_tag = tags.get("fee")
-        est_cost = 0 if fee_tag == "no" else DEFAULT_COST_BY_TYPE.get(place_type, DEFAULT_COST_BY_TYPE["default"])
-        est_duration = DEFAULT_DURATION_BY_TYPE.get(place_type, DEFAULT_DURATION_BY_TYPE["default"])
-
-        # ความนิยม/ความน่าเชื่อถือ: มี wikipedia/wikidata ผูกไว้ ถือว่าเป็นสถานที่ที่มีชื่อเสียง/รีวิวดี
-        has_wiki = bool(tags.get("wikipedia") or tags.get("wikidata"))
-        credibility = 1.0 if has_wiki else 0.55
-        popularity_label = "เป็นที่นิยม" if has_wiki else "ทั่วไป"
-
-        rows.append({
-            "name": name,
-            "province": province,
-            "type": place_type,
-            "interests": matched_interests,
-            "lat": el.get("lat"),
-            "lon": el.get("lon"),
-            "estimated_cost": est_cost,
-            "estimated_duration_hr": est_duration,
-            "credibility_score": credibility,
-            "popularity": popularity_label,
-            "activities": ACTIVITY_BY_TYPE.get(place_type, ACTIVITY_BY_TYPE["default"]),
-            "season": SEASON_BY_TYPE.get(place_type, SEASON_BY_TYPE["default"]),
-            "travel_styles": TRAVEL_STYLE_BY_TYPE.get(place_type, TRAVEL_STYLE_BY_TYPE["default"]),
-        })
-
-    return pd.DataFrame(rows).drop_duplicates(subset=["name"]).reset_index(drop=True)
-
-
-# ----------------------------------------------------------------------------
-# ส่วนคำนวณคะแนน (3.5 Weighted Scoring: ความสนใจ 40% / งบประมาณ 30% / ระยะเวลา 20% / รีวิว 10%)
-# ----------------------------------------------------------------------------
-
-def calculate_interest_score(row, selected_interests):
-    if not selected_interests:
-        return 1.0
-    if not row["interests"]:
+    place_tag_list = [t.strip() for t in place_tags.split(",") if t.strip()]
+    if not place_tag_list:
         return 0.0
-    matched = len(set(row["interests"]) & set(selected_interests))
-    return matched / len(selected_interests)
+
+    matched = len(set(user_interests) & set(place_tag_list))
+    return matched / len(user_interests)
 
 
-def calculate_budget_score(row, budget_per_person):
-    if budget_per_person <= 0:
+def calculate_budget_score(cost: float, user_budget: float) -> float:
+    """
+    ปัจจัยงบประมาณ: สถานที่ที่อยู่ในงบประมาณผู้ใช้ได้คะแนนเต็ม 1.0
+    ยิ่งเกินงบประมาณมาก คะแนนยิ่งลดลง (จนต่ำสุด 0)
+    """
+    if user_budget <= 0:
         return 0.0
-    cost = row["estimated_cost"]
-    if cost <= budget_per_person:
+    if cost <= user_budget:
         return 1.0
-    over_ratio = (cost - budget_per_person) / budget_per_person
+    over_ratio = (cost - user_budget) / user_budget
     return max(0.0, 1.0 - over_ratio)
 
 
-def calculate_duration_score(row, available_days):
-    available_hours = available_days * 8  # สมมติเที่ยวได้วันละ ~8 ชม.
-    if available_hours <= 0:
+def calculate_duration_score(suggested_days: float, user_days: float) -> float:
+    """
+    ปัจจัยระยะเวลา: ยิ่งจำนวนวันที่แนะนำใกล้เคียงกับเวลาที่ผู้ใช้มี คะแนนยิ่งสูง
+    """
+    if user_days <= 0:
         return 0.0
-    duration = row["estimated_duration_hr"]
-    if duration <= available_hours:
-        return 1.0
-    return max(0.0, available_hours / duration)
+    diff = abs(suggested_days - user_days)
+    denom = max(suggested_days, user_days)
+    return max(0.0, 1.0 - diff / denom)
 
 
-def calculate_review_score(row):
-    return row["credibility_score"]
+def calculate_review_score(review_score: float) -> float:
+    """
+    คะแนนรีวิว: normalize คะแนนรีวิว (เต็ม 5) ให้อยู่ในช่วง 0-1
+    """
+    return max(0.0, min(1.0, review_score / 5.0))
 
 
-def calculate_score(row, selected_interests, budget_per_person, available_days):
-    interest = calculate_interest_score(row, selected_interests)
-    budget = calculate_budget_score(row, budget_per_person)
-    duration = calculate_duration_score(row, available_days)
-    review = calculate_review_score(row)
-    total = (interest * 0.40) + (budget * 0.30) + (duration * 0.20) + (review * 0.10)
-    return interest, budget, duration, review, total
+# ----------------------------------------------------------------------
+# 3) Weighted Scoring (บทที่ 3.5 การคำนวณคะแนน) -> calculate_score()
+# ----------------------------------------------------------------------
+def calculate_score(row: pd.Series, user_budget: float, user_days: float,
+                     user_interests: list[str]) -> pd.Series:
+    interest_s = calculate_interest_score(row["interest_tags"], user_interests)
+    budget_s = calculate_budget_score(row["cost_per_person"], user_budget)
+    duration_s = calculate_duration_score(row["suggested_days"], user_days)
+    review_s = calculate_review_score(row["review_score"])
+
+    total_score = (
+        WEIGHT_INTEREST * interest_s
+        + WEIGHT_BUDGET * budget_s
+        + WEIGHT_DURATION * duration_s
+        + WEIGHT_REVIEW * review_s
+    ) * 100  # แปลงเป็นคะแนนเต็ม 100 เพื่อให้แสดงผลเข้าใจง่าย #
+    #คะแนนรวม = (ความสนใจ × 40%) + (งบประมาณ × 30%) + (ระยะเวลา × 20%) + (รีวิว × 10%)
 
 
-def recommend(df, selected_interests, budget_per_person, available_days, top_n=TOP_N):
+    return pd.Series({
+        "interest_score": round(interest_s * 100, 1),
+        "budget_score": round(budget_s * 100, 1),
+        "duration_score": round(duration_s * 100, 1),
+        "review_score_norm": round(review_s * 100, 1),
+        "total_score": round(total_score, 1),
+    })
+
+
+def filter_by_province(df: pd.DataFrame, user_provinces: list[str]) -> pd.DataFrame:
+    """
+    ตัวกรองจังหวัด: ถ้าผู้ใช้ไม่เลือกจังหวัดใดเลย ให้แสดงทุกจังหวัด (ไม่กรอง)
+    ถ้าเลือกไว้ ให้แสดงเฉพาะสถานที่ที่อยู่ในจังหวัดที่เลือกเท่านั้น
+    """
+    if not user_provinces:
+        return df
+    return df[df["province"].isin(user_provinces)].reset_index(drop=True)
+
+
+def recommend(df: pd.DataFrame, user_budget: float, user_days: float,
+               user_interests: list[str], top_n: int = TOP_N) -> pd.DataFrame:
+    """
+    คำนวณคะแนนของทุกแถว แล้วจัดอันดับ (Ranking) ด้วย sort_values()
+    คืนค่าเฉพาะ Top N อันดับแรก -> ระบบแนะนำ Top 5
+    """
     if df.empty:
         return df
-    df = df.copy()
-    scores = df.apply(
-        lambda r: calculate_score(r, selected_interests, budget_per_person, available_days),
-        axis=1, result_type="expand",
-    )
-    scores.columns = ["interest_score", "budget_score", "duration_score", "review_score", "total_score"]
-    df = pd.concat([df, scores], axis=1)
-    return df.sort_values("total_score", ascending=False).head(top_n).reset_index(drop=True)
 
-
-def build_reasons(row, selected_interests, travel_style):
-    """สร้างเหตุผลประกอบการแนะนำ (ใช้แสดงในหน้าผลลัพธ์ ไม่ใช่ตัวเลขที่เข้าสูตรคะแนน)"""
-    reasons = []
-    if selected_interests and row["interest_score"] >= 0.5:
-        reasons.append("ตรงกับความสนใจที่เลือก")
-    if row["budget_score"] >= 0.8:
-        reasons.append("อยู่ในงบประมาณ")
-    if row["duration_score"] >= 0.8:
-        reasons.append("เหมาะกับระยะเวลาที่มี")
-    if row["review_score"] >= 0.8:
-        reasons.append("มีคะแนนรีวิวในระดับดี")
-    if travel_style and travel_style in row["travel_styles"]:
-        reasons.append(f"เหมาะกับรูปแบบการเดินทางแบบ{travel_style}")
-    if not reasons:
-        reasons.append("เป็นตัวเลือกที่ใกล้เคียงความต้องการของคุณมากที่สุดในพื้นที่นี้")
-    return reasons
-
-
-# ----------------------------------------------------------------------------
-# ส่วนติดต่อผู้ใช้ — 4 หน้าจอตามรายงาน 3.6
-# ----------------------------------------------------------------------------
-
-def go_to(page):
-    st.session_state.page = page
-
-
-def screen_home():
-    st.title("TravelMatch 🧭")
-    st.markdown("#### “ค้นหาที่เที่ยวที่ใช่ ให้เหมาะกับงบ เวลา และความสนใจของคุณ”")
-    st.write("")
-    if st.button("🔍 เริ่มค้นหาสถานที่ท่องเที่ยว", type="primary"):
-        go_to("form")
-
-
-def screen_form():
-    st.title("กรอกข้อมูลความต้องการของคุณ")
-
-    location_text = st.text_input("จังหวัด / พื้นที่ที่ต้องการเที่ยว", value="เชียงใหม่")
-    col1, col2 = st.columns(2)
-    with col1:
-        budget = st.number_input("งบประมาณต่อคน (บาท)", min_value=0, value=1000, step=100)
-        days = st.number_input("จำนวนวัน", min_value=1, value=1, step=1)
-    with col2:
-        travelers = st.number_input("จำนวนผู้เดินทาง (คน)", min_value=1, value=1, step=1)
-        travel_style = st.selectbox("รูปแบบการเดินทาง", TRAVEL_STYLE_OPTIONS)
-
-    interests = st.multiselect("ประเภทสถานที่ที่สนใจ", list(INTEREST_TAG_MAP.keys()))
-    activities = st.multiselect("กิจกรรมที่ต้องการ (ถ้ามี)", ACTIVITY_OPTIONS)
-
-    with st.expander("ตั้งค่าการค้นหาขั้นสูง"):
-        radius_km = st.slider("รัศมีการค้นหารอบพื้นที่ (กม.)", min_value=1, max_value=30, value=10)
-
-    if st.button("🔎 ค้นหาสถานที่ที่เหมาะกับฉัน", type="primary"):
-        if not location_text.strip():
-            st.warning("กรุณาระบุจังหวัด/พื้นที่ที่ต้องการเที่ยว")
-            return
-
-        with st.spinner("กำลังค้นหาพิกัด..."):
-            coords = geocode_location(location_text)
-        if not coords:
-            st.error("ไม่พบพื้นที่ที่ระบุ ลองพิมพ์ชื่อจังหวัด/พื้นที่ใหม่อีกครั้ง")
-            return
-        lat, lon = coords
-
-        with st.spinner("กำลังดึงข้อมูลสถานที่แบบเรียลไทม์จาก OpenStreetMap..."):
-            df = load_data(lat, lon, radius_km, interests)
-
-        if df.empty:
-            st.warning("ไม่พบสถานที่ในพื้นที่นี้ ลองขยายรัศมีการค้นหา หรือเปลี่ยนประเภทสถานที่")
-            return
-
-        df["distance_km"] = df.apply(lambda r: round(haversine_km(lat, lon, r["lat"], r["lon"]), 1), axis=1)
-        results = recommend(df, interests, budget, days)
-
-        st.session_state.results = results
-        st.session_state.user_input = {
-            "location_text": location_text, "budget": budget, "days": days,
-            "travelers": travelers, "travel_style": travel_style,
-            "interests": interests, "activities": activities,
-        }
-        go_to("results")
-
-    if st.button("← กลับหน้าแรก"):
-        go_to("home")
-
-
-def screen_results():
-    st.title("ผลการแนะนำสถานที่ท่องเที่ยว")
-    results = st.session_state.get("results")
-    user_input = st.session_state.get("user_input", {})
-
-    if results is None or results.empty:
-        st.info("ยังไม่มีผลการค้นหา กรุณากรอกข้อมูลก่อน")
-        if st.button("← กลับไปกรอกข้อมูล"):
-            go_to("form")
-        return
-
-    st.caption(
-        f"พื้นที่: {user_input.get('location_text')} | งบประมาณ/คน: {user_input.get('budget')} บาท | "
-        f"จำนวนวัน: {user_input.get('days')} | ผู้เดินทาง: {user_input.get('travelers')} คน | "
-        f"รูปแบบ: {user_input.get('travel_style')}"
+    scored = df.join(
+        df.apply(lambda row: calculate_score(row, user_budget, user_days, user_interests), axis=1)
     )
 
-    # ตารางคะแนนแยกปัจจัย ตามตัวอย่างในรายงาน 4.2
-    table = results.copy()
-    table.insert(0, "อันดับ", range(1, len(table) + 1))
-    table_display = table[[
-        "อันดับ", "name", "interest_score", "budget_score", "duration_score", "review_score", "total_score"
-    ]].rename(columns={
-        "name": "สถานที่", "interest_score": "คะแนนความสนใจ", "budget_score": "คะแนนงบประมาณ",
-        "duration_score": "คะแนนระยะเวลา", "review_score": "คะแนนรีวิว", "total_score": "คะแนนรวม",
-    })
-    for col in ["คะแนนความสนใจ", "คะแนนงบประมาณ", "คะแนนระยะเวลา", "คะแนนรีวิว", "คะแนนรวม"]:
-        table_display[col] = (table_display[col] * 100).round(0).astype(int).astype(str) + "%"
-    st.dataframe(table_display, hide_index=True, use_container_width=True)
+    # Ranking: เรียงจากคะแนนรวมมากไปน้อย
+    ranked = scored.sort_values(by="total_score", ascending=False).reset_index(drop=True)
 
-    st.write("---")
-
-    for i, row in results.iterrows():
-        with st.container(border=True):
-            st.subheader(f"อันดับ {i + 1}: {row['name']}")
-            st.write(f"จังหวัด/พื้นที่: {row['province']} | ประเภท: {row['type']} | ระยะทาง: {row['distance_km']} กม.")
-            st.write(
-                f"ค่าใช้จ่ายโดยประมาณ: {row['estimated_cost']} บาท/คน | "
-                f"ระยะเวลาแนะนำ: {row['estimated_duration_hr']} ชม. | ความนิยม: {row['popularity']}"
-            )
-            reasons = build_reasons(row, user_input.get("interests", []), user_input.get("travel_style"))
-            st.write("เหตุผลที่แนะนำ:")
-            for r in reasons:
-                st.write(f"- {r}")
-            if st.button("ดูรายละเอียด", key=f"detail_{i}"):
-                st.session_state.selected_place = row.to_dict()
-                go_to("detail")
-
-    st.write("")
-    if st.button("← กลับไปแก้ไขข้อมูล"):
-        go_to("form")
+    return ranked.head(top_n)
 
 
-def screen_detail():
-    place = st.session_state.get("selected_place")
-    if not place:
-        st.info("ยังไม่ได้เลือกสถานที่")
-        if st.button("← กลับไปหน้าผลลัพธ์"):
-            go_to("results")
-        return
-
-    user_input = st.session_state.get("user_input", {})
-    travelers = user_input.get("travelers", 1)
-
-    st.title(place["name"])
-    st.caption(f"{place['province']} • ประเภท: {place['type']}")
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric("ค่าใช้จ่ายโดยประมาณ (ต่อคน)", f"{place['estimated_cost']} บาท")
-        st.metric("ค่าใช้จ่ายรวมกลุ่มโดยประมาณ", f"{place['estimated_cost'] * travelers} บาท")
-        st.metric("ระยะเวลาแนะนำ", f"{place['estimated_duration_hr']} ชม.")
-    with col2:
-        st.metric("คะแนนรีวิว (ประมาณ)", f"{place['credibility_score'] * 100:.0f}%")
-        st.metric("ความนิยม", place["popularity"])
-        st.metric("ระยะทางจากจุดค้นหา", f"{place['distance_km']} กม.")
-
-    st.write("**กิจกรรมที่ทำได้:**", ", ".join(place["activities"]))
-    st.write("**ฤดูกาลที่เหมาะสม:**", place["season"])
-    st.write("**เหมาะกับรูปแบบการเดินทาง:**", ", ".join(place["travel_styles"]))
-
-    if place.get("lat") and place.get("lon"):
-        maps_url = f"https://www.google.com/maps?q={place['lat']},{place['lon']}"
-        st.write(f"**ข้อมูลการเดินทาง:** [เปิดใน Google Maps]({maps_url})")
-
-    st.caption("หมายเหตุ: ค่าใช้จ่าย/ระยะเวลา/ฤดูกาล/รูปแบบการเดินทาง เป็นค่าประมาณจากประเภทสถานที่ เนื่องจาก OpenStreetMap ไม่มีข้อมูลเหล่านี้ครบทุกแห่ง")
-
-    if st.button("← กลับไปหน้าผลลัพธ์"):
-        go_to("results")
-
-
+# ----------------------------------------------------------------------
+# 4) ส่วนติดต่อผู้ใช้ (Streamlit UI) — บทที่ 3.6 การออกแบบหน้าจอ
+# ----------------------------------------------------------------------
 def main():
-    st.set_page_config(page_title="TravelMatch 🧭", page_icon="🧭")
-    if "page" not in st.session_state:
-        st.session_state.page = "home"
+    st.set_page_config(page_title="TravelMatch", page_icon="🧭", layout="wide")
 
-    page = st.session_state.page
-    if page == "home":
-        screen_home()
-    elif page == "form":
-        screen_form()
-    elif page == "results":
-        screen_results()
-    elif page == "detail":
-        screen_detail()
+    # Custom background color (main content + sidebar)
+    st.markdown(
+        """
+        <style>
+        .stApp {
+            background-color: #;
+        }
+        section[data-testid="stSidebar"] {
+            background-color: #;
+        }
+        section[data-testid="stSidebar"] * {
+            color: # !important;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    st.title("🧭 TravelMatch")
+
+    if BANNER_IMAGE_URL:
+        st.image(BANNER_IMAGE_URL, use_container_width=True)
+
+    st.caption("ระบบแนะนำสถานที่ท่องเที่ยวที่เหมาะสมกับงบประมาณ ระยะเวลา และความสนใจของผู้ใช้")
+
+    df = load_data()
+
+    # รวบรวม tag ความสนใจทั้งหมดจากชุดข้อมูล เพื่อให้ผู้ใช้เลือก
+    all_tags = sorted({
+        tag.strip()
+        for tags in df["interest_tags"]
+        for tag in tags.split(",")
+        if tag.strip()
+    })
+
+    # รวบรวมรายชื่อจังหวัดทั้งหมดจากชุดข้อมูล เพื่อให้ผู้ใช้เลือกกรอง
+    all_provinces = sorted(df["province"].unique().tolist())
+
+    # ---------------- Sidebar: รับข้อมูลความต้องการของผู้ใช้ (User Data) ----------------
+    with st.sidebar:
+        st.header("📝 บอกความต้องการของคุณ")
+
+        user_provinces = st.multiselect(
+            "📍 จังหวัด (ไม่เลือก = แสดงทุกจังหวัด)",
+            options=all_provinces,
+            default=[],
+        )
+        user_budget = st.number_input(
+            "งบประมาณต่อคน (บาท)", min_value=500, max_value=20000, value=3000, step=100
+        )
+        user_days = st.number_input(
+            "ระยะเวลาที่มี (วัน)", min_value=1, max_value=10, value=2, step=1
+        )
+        user_people = st.number_input(
+            "👥 จำนวนคน (ผู้ร่วมเดินทาง)", min_value=1, max_value=20, value=2, step=1
+        )
+        user_interests = st.multiselect(
+            "ความสนใจ (เลือกได้หลายข้อ)",
+            options=all_tags,
+            default=["ธรรมชาติ", "ผ่อนคลาย"] if {"ธรรมชาติ", "ผ่อนคลาย"} <= set(all_tags) else [],
+        )
+
+        st.divider()
+        run_button = st.button("🔍 ค้นหาสถานที่ที่ใช่สำหรับคุณ", use_container_width=True, type="primary")
+
+        with st.expander("⚙️ น้ำหนักปัจจัยที่ระบบใช้คำนวณ"):
+            st.write(f"- ความสนใจ: **{WEIGHT_INTEREST*100:.0f}%**")
+            st.write(f"- งบประมาณ: **{WEIGHT_BUDGET*100:.0f}%**")
+            st.write(f"- ระยะเวลา: **{WEIGHT_DURATION*100:.0f}%**")
+            st.write(f"- คะแนนรีวิว: **{WEIGHT_REVIEW*100:.0f}%**")
+
+    # ---------------- ผลลัพธ์ ----------------
+    if run_button or "last_result" in st.session_state:
+        if run_button:
+            filtered_df = filter_by_province(df, user_provinces)
+            st.session_state["last_result"] = recommend(filtered_df, user_budget, user_days, user_interests)
+            st.session_state["last_provinces"] = user_provinces
+            st.session_state["last_people"] = user_people
+
+        result = st.session_state["last_result"]
+
+        if result.empty:
+            st.warning(
+                f"ไม่พบสถานที่ท่องเที่ยวในจังหวัดที่เลือก ({', '.join(st.session_state['last_provinces'])}) "
+                "ลองเลือกจังหวัดอื่น หรือไม่เลือกจังหวัดเลยเพื่อดูทุกที่"
+            )
+            return
+
+        province_label = (
+            f" ในจังหวัด {', '.join(st.session_state['last_provinces'])}"
+            if st.session_state.get("last_provinces") else ""
+        )
+        st.subheader(f"🏆 Top {len(result)} สถานที่แนะนำสำหรับคุณ{province_label}")
+
+        for i, row in result.iterrows():
+            with st.container(border=True):
+                col1, col2 = st.columns([3, 1])
+                with col1:
+                    st.markdown(f"### {i+1}. {row['place_name']} — {row['province']}")
+                    if row.get("image_url"):
+                        st.image(row["image_url"], use_container_width=True)
+                    st.write(row["description"])
+                    st.caption(f"หมวดหมู่: {row['category']} | tag: {row['interest_tags']}")
+                    people = st.session_state.get("last_people", 1)
+                    total_cost = row["cost_per_person"] * people
+                    st.write(
+                        f"💰 ค่าใช้จ่ายโดยประมาณ: {row['cost_per_person']:,.0f} บาท/คน  |  "
+                        f"👥 {people} คน รวม **{total_cost:,.0f} บาท**  |  "
+                        f"🗓️ ระยะเวลาแนะนำ: {row['suggested_days']:.0f} วัน  |  "
+                        f"⭐ รีวิว: {row['review_score']:.1f}/5"
+                    )
+                with col2:
+                    st.metric("คะแนนความเหมาะสม", f"{row['total_score']:.1f}")
+                    st.progress(min(1.0, row["total_score"] / 100))
+
+                with st.expander("ดูรายละเอียดคะแนนแต่ละปัจจัย (Weighted Scoring)"):
+                    score_detail = pd.DataFrame({
+                        "ปัจจัย": ["ความสนใจ (40%)", "งบประมาณ (30%)", "ระยะเวลา (20%)", "คะแนนรีวิว (10%)"],
+                        "คะแนน (เต็ม 100)": [
+                            row["interest_score"], row["budget_score"],
+                            row["duration_score"], row["review_score_norm"],
+                        ],
+                    })
+                    st.dataframe(score_detail, hide_index=True, use_container_width=True)
+
+        with st.expander("📊 ดูตารางคะแนนทั้งหมด (สำหรับอ้างอิงในบทที่ 4)"):
+            people = st.session_state.get("last_people", 1)
+            table = result.copy()
+            table["total_cost_group"] = table["cost_per_person"] * people
+            st.dataframe(
+                table[[
+                    "place_id", "place_name", "province", "category",
+                    "cost_per_person", "total_cost_group",
+                    "interest_score", "budget_score", "duration_score",
+                    "review_score_norm", "total_score",
+                ]],
+                hide_index=True, use_container_width=True,
+            )
+    else:
+        st.info("⬅️ กรอกงบประมาณ ระยะเวลา และความสนใจในแถบด้านซ้าย แล้วกดปุ่ม 'ค้นหาสถานที่ที่ใช่สำหรับคุณ'")
+        st.dataframe(df.drop(columns=["interest_tags"]), hide_index=True, use_container_width=True)
 
 
 if __name__ == "__main__":
