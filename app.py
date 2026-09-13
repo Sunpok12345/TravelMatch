@@ -261,7 +261,7 @@ def screen_results():
 
     if results is None or results.empty:
         st.info("ยังไม่มีผลการค้นหา กรุณากรอกข้อมูลก่อน")
-        if st.button("← กลับไปกรอกข้อมูล"):
+        if st.button("← ย้อนกลับ"):
             go_to("form")
         return
 
