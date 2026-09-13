@@ -308,7 +308,7 @@ def screen_results():
                     go_to("detail")
 
     st.write("")
-    if st.button("← กลับไปแก้ไขข้อมูล"):
+    if st.button("← ย้อนกลับ"):
         go_to("form")
 
 
