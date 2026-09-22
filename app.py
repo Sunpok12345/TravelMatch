@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """
 TravelMatch 🧭 (Static / CSV Edition — ตรงตามรายงานบทที่ 3-4, ไม่ใช้ข้อมูลเรียลไทม์)
+
 ระบบแนะนำสถานที่ท่องเที่ยวที่เหมาะสมกับงบประมาณ ระยะเวลา และความสนใจของผู้ใช้
 อ่านข้อมูลสถานที่จาก travel_data.csv (สร้างโดย generate_data.py) ตามเครื่องมือที่ระบุใน 3.7
-(Python, Pandas, NumPy, Streamlit, CSV) — ไม่มีการเชื่อมต่ออินเทอร์เน็ต/API ภายนอกใดๆ
+(Python, Pandas, NumPy, Streamlit, CSV)
 
 โครงสร้างอ้างอิงจากรายงาน:
 - 3.3 ข้อมูลที่ใช้ในระบบ (ข้อมูลผู้ใช้ / ข้อมูลสถานที่ท่องเที่ยว)
@@ -12,6 +13,13 @@ TravelMatch 🧭 (Static / CSV Edition — ตรงตามรายงาน�
 
 หมายเหตุ: รูปแบบการเดินทาง / กิจกรรม / ฤดูกาล / จำนวนผู้เดินทาง เป็น "ข้อมูลประกอบการตัดสินใจ"
 และใช้สร้างเหตุผลประกอบการแนะนำเท่านั้น ไม่ได้เข้าสูตรคะแนนรวม (มีแค่ 4 ปัจจัยถ่วงน้ำหนักตาม 3.5)
+
+หมายเหตุเรื่องรูปภาพ: ระบบพยายามดึงรูปจริงของสถานที่จาก Wikipedia / Wikimedia Commons ก่อน
+(ค้นหาด้วย "ชื่อสถานที่ + จังหวัด" เพื่อลดโอกาสจับคู่ผิด) และใช้ Openverse API เป็น fallback
+ขั้นสุดท้าย (คลังรูปลิขสิทธิ์เสรีที่รวมจาก Flickr, Europeana ฯลฯ ไม่ต้องใช้ API key)
+เนื่องจากเป็นบริการภายนอก ผลลัพธ์อาจไม่แม่นยำ 100% ในบางสถานที่ที่เล็ก/ไม่มีบทความ
+หากต้องการรูปที่แม่นยำแน่นอน ให้ใส่คอลัมน์ image_url ใน travel_data.csv สำหรับสถานที่นั้นๆ
+แล้วระบบจะใช้ลิงก์นั้นโดยตรงแทนการค้นหาออนไลน์
 """
 
 import pandas as pd
@@ -25,9 +33,7 @@ INTEREST_OPTIONS = [
     "ธรรมชาติ", "ทะเล / ชายหาด", "ประวัติศาสตร์ / วัฒนธรรม",
     "วัด / ศาสนสถาน", "ช้อปปิ้ง / ไลฟ์สไตล์", "สวนสนุก / กิจกรรม",
 ]
-
 TRAVEL_STYLE_OPTIONS = ["พักผ่อน", "ผจญภัย", "ครอบครัว", "ถ่ายภาพ"]
-
 ACTIVITY_OPTIONS = [
     "เดินป่า/เดินเล่น", "ถ่ายภาพ", "ปิกนิก", "เล่นน้ำ", "พักผ่อน",
     "ชมวัฒนธรรม", "ไหว้พระ", "ช้อปปิ้ง", "เครื่องเล่น/ผจญภัย",
@@ -46,68 +52,25 @@ TYPE_COLOR = {
     "default": "#F0F2F6",
 }
 
-WIKI_HEADERS = {"User-Agent": "TravelMatchApp/1.0 (educational project)"}
+WIKI_HEADERS = {"User-Agent": "TravelMatchApp/1.0 (educational project; contact: n/a)"}
 WIKI_LANGS = ["th", "en"]
+OPENVERSE_HEADERS = {"User-Agent": "TravelMatchApp/1.0 (educational project; contact: n/a)"}
 
 
-@st.cache_data(ttl=604800, show_spinner=False)
-def fetch_place_image(name: str, lat: float = None, lon: float = None):
-    """
-    ดึงรูปภาพจริงของสถานที่ — ลองหลายวิธีเรียงตามความแม่นยำ เพื่อให้ได้รูปครบทุกสถานที่
-    มากที่สุดเท่าที่จะทำได้ (จุดเชื่อมต่ออินเทอร์เน็ตเดียวในแอป ใช้แค่หารูปภาพประกอบเท่านั้น
-    ข้อมูลสถานที่/คะแนนยังคงเป็นข้อมูลนิ่งจาก travel_data.csv เหมือนเดิมทุกส่วน):
-
-    1) ค้นหาบทความ Wikipedia ที่อยู่ใกล้พิกัด (lat, lon) ของสถานที่ — แม่นยำที่สุด
-       เพราะอิงจากตำแหน่งจริง ไม่ใช่การจับคู่ชื่อ ใช้ได้ดีแม้สถานที่นั้นไม่มีบทความของตัวเอง
-       (เช่น ห้าง สวนสัตว์เล็กๆ จุดดำน้ำ) เพราะจะดึงรูปจากบทความที่อยู่ใกล้ที่สุดแทน
-    2) ค้นหาบทความ Wikipedia จากชื่อสถานที่โดยตรง (ภาษาไทยก่อน แล้วอังกฤษ)
-    3) ค้นหารูปภาพจาก Wikimedia Commons โดยตรงด้วยชื่อสถานที่
-    หากหาไม่ได้เลยทั้ง 3 วิธี จะ fallback เป็นไอคอนสีพาสเทลแทน (place_image_or_icon)
-    """
-    # 1) Geosearch ตามพิกัดจริง — วิธีที่แม่นยำและครอบคลุมที่สุดสำหรับสถานที่ทางภูมิศาสตร์
-    if lat is not None and lon is not None:
-        for lang in WIKI_LANGS:
-            try:
-                resp = requests.get(
-                    f"https://{lang}.wikipedia.org/w/api.php",
-                    params={
-                        "action": "query",
-                        "generator": "geosearch",
-                        "ggscoord": f"{lat}|{lon}",
-                        "ggsradius": 5000,
-                        "ggslimit": 8,
-                        "prop": "pageimages",
-                        "piprop": "thumbnail",
-                        "pithumbsize": 500,
-                        "format": "json",
-                    },
-                    headers=WIKI_HEADERS, timeout=8,
-                )
-                resp.raise_for_status()
-                pages = resp.json().get("query", {}).get("pages", {})
-                ordered = sorted(
-                    pages.values(),
-                    key=lambda p: p.get("dist", 1e9) if isinstance(p.get("dist"), (int, float)) else 1e9,
-                )
-                for page in ordered:
-                    thumb = page.get("thumbnail", {})
-                    if thumb.get("source"):
-                        return thumb["source"]
-            except Exception:
-                continue
-
-    # 2) ค้นหาจากชื่อสถานที่โดยตรง (Wikipedia search + summary) — วิธีเดิม
+def _wikipedia_image(query: str):
+    """ขั้นตอนที่ 1-2: ค้นหาใน Wikipedia (th แล้วค่อย en) ด้วยคำค้นที่ให้มา"""
     for lang in WIKI_LANGS:
         try:
             search_resp = requests.get(
                 f"https://{lang}.wikipedia.org/w/api.php",
-                params={"action": "query", "list": "search", "srsearch": name, "format": "json", "srlimit": 1},
+                params={"action": "query", "list": "search", "srsearch": query, "format": "json", "srlimit": 1},
                 headers=WIKI_HEADERS, timeout=8,
             )
             search_resp.raise_for_status()
             hits = search_resp.json().get("query", {}).get("search", [])
             if not hits:
                 continue
+
             title = hits[0]["title"]
             summary_resp = requests.get(
                 f"https://{lang}.wikipedia.org/api/rest_v1/page/summary/{requests.utils.quote(title)}",
@@ -115,27 +78,31 @@ def fetch_place_image(name: str, lat: float = None, lon: float = None):
             )
             if summary_resp.status_code != 200:
                 continue
+
             data = summary_resp.json()
             thumb = data.get("thumbnail") or data.get("originalimage") or {}
             if thumb.get("source"):
                 return thumb["source"]
         except Exception:
             continue
+    return None
 
-    # 3) ค้นหาโดยตรงจาก Wikimedia Commons — ครอบคลุมสถานที่ที่ไม่มีบทความ Wikipedia เป็นของตัวเอง
-    #    แต่มีรูปภาพอยู่ใน Commons (เช่น ห้างสรรพสินค้า จุดกิจกรรม สถานที่ท่องเที่ยวเล็กๆ)
+
+def _wikimedia_commons_image(query: str):
+    """ค้นหาใน Wikimedia Commons โดยตรง (คลังรูปภาพเสรีของ Wikipedia) — เผื่อสถานที่
+    ไม่มีบทความ Wikipedia แต่มีรูปอยู่ใน Commons"""
     try:
         resp = requests.get(
             "https://commons.wikimedia.org/w/api.php",
             params={
                 "action": "query",
                 "generator": "search",
-                "gsrsearch": f"{name} Thailand",
-                "gsrnamespace": 6,
-                "gsrlimit": 3,
+                "gsrnamespace": 6,  # ไฟล์ (File:) namespace เท่านั้น
+                "gsrsearch": query,
+                "gsrlimit": 1,
                 "prop": "imageinfo",
                 "iiprop": "url",
-                "iiurlwidth": 500,
+                "iiurlwidth": 800,
                 "format": "json",
             },
             headers=WIKI_HEADERS, timeout=8,
@@ -143,20 +110,76 @@ def fetch_place_image(name: str, lat: float = None, lon: float = None):
         resp.raise_for_status()
         pages = resp.json().get("query", {}).get("pages", {})
         for page in pages.values():
-            infos = page.get("imageinfo", [])
-            if infos and infos[0].get("thumburl"):
-                return infos[0]["thumburl"]
+            imageinfo = page.get("imageinfo", [])
+            if imageinfo:
+                info = imageinfo[0]
+                return info.get("thumburl") or info.get("url")
     except Exception:
         pass
+    return None
+
+
+def _openverse_image(query: str):
+    """ขั้นตอนที่ 4 (fallback สุดท้าย): Openverse API — คลังรูปลิขสิทธิ์เสรีที่รวมจาก
+    Flickr, Europeana ฯลฯ ไม่ต้องใช้ API key สำหรับการค้นหาพื้นฐาน"""
+    try:
+        resp = requests.get(
+            "https://api.openverse.org/v1/images/",
+            params={"q": query, "page_size": 1, "license_type": "all-cc"},
+            headers=OPENVERSE_HEADERS, timeout=8,
+        )
+        resp.raise_for_status()
+        results = resp.json().get("results", [])
+        if results:
+            return results[0].get("thumbnail") or results[0].get("url")
+    except Exception:
+        pass
+    return None
+
+
+@st.cache_data(ttl=604800, show_spinner=False)
+def fetch_place_image(name: str, province: str = ""):
+    """
+    ดึงรูปภาพจริงของสถานที่ ลำดับการค้นหา:
+      1-2) Wikipedia (th แล้ว en) ค้นหาด้วย "ชื่อสถานที่ + จังหวัด" เพื่อลดโอกาสจับคู่ผิด
+           (เช่น ชื่อสถานที่ซ้ำกันคนละจังหวัด)
+      3)   Wikimedia Commons โดยตรง เผื่อสถานที่ไม่มีบทความ Wikipedia แต่มีรูปอยู่ใน Commons
+      4)   Openverse API เป็น fallback สุดท้าย ก่อนไปใช้ไอคอนแทน
+
+    ครอบคลุมสถานที่ทั่วไปอย่างห้าง ส่วนตัว ตลาด หรือสวนสนุกได้มากกว่าเดิม แต่ระบบภายนอก
+    ไม่รับประกันผลลัพธ์ 100% เสมอไป — หากต้องการรูปที่แม่นยำแน่นอน ให้ใส่ image_url ใน
+    travel_data.csv สำหรับแถวนั้นแทน (ดู place_image_or_icon ด้านล่าง)
+    """
+    query = f"{name} {province}".strip() if province else name
+
+    image_url = _wikipedia_image(query)
+    if image_url:
+        return image_url
+
+    image_url = _wikimedia_commons_image(query)
+    if image_url:
+        return image_url
+
+    image_url = _openverse_image(query)
+    if image_url:
+        return image_url
 
     return None
 
 
 def place_image_or_icon(row, height_px=160):
-    """แสดงรูปภาพจริงถ้าหาเจอ ไม่งั้นแสดงไอคอนสีพาสเทลตามประเภทสถานที่"""
-    lat = row["lat"] if "lat" in row and pd.notna(row["lat"]) else None
-    lon = row["lon"] if "lon" in row and pd.notna(row["lon"]) else None
-    image_url = fetch_place_image(row["name"], lat, lon)
+    """แสดงรูปภาพจริงถ้าหาเจอ ไม่งั้นแสดงไอคอนสีพาสเทลตามประเภทสถานที่
+
+    ลำดับความสำคัญ: ถ้าใน travel_data.csv มีคอลัมน์ image_url และมีค่าสำหรับแถวนี้
+    (ผู้ดูแลเลือกใส่ลิงก์เอง เพื่อการันตีว่าตรงกับสถานที่ 100%) จะใช้ลิงก์นั้นก่อนเสมอ
+    ไม่ต้องไปค้นหาออนไลน์ให้เสียเวลา/มีโอกาสผิดพลาด
+    """
+    manual_url = row.get("image_url") if hasattr(row, "get") else None
+    if isinstance(manual_url, str) and manual_url.strip():
+        image_url = manual_url.strip()
+    else:
+        image_url = fetch_place_image(row["name"], row.get("province", ""))
+
     if image_url:
         st.image(image_url, use_container_width=True)
     else:
@@ -175,6 +198,7 @@ def place_image_or_icon(row, height_px=160):
 @st.cache_data(show_spinner=False)
 def load_data():
     df = pd.read_csv(DATA_FILE)
+
     # ตรวจสอบความถูกต้องของข้อมูลก่อนนำไปประมวลผล (ตาม 3.8 ข้อ 2)
     required_cols = [
         "name", "province", "type", "cost", "duration_days", "review_score",
@@ -184,6 +208,12 @@ def load_data():
     if missing:
         st.error(f"ไฟล์ข้อมูลขาดคอลัมน์: {', '.join(missing)}")
         return pd.DataFrame()
+
+    # image_url เป็นคอลัมน์ทางเลือก — ถ้าไม่มีในไฟล์ ให้เพิ่มเป็นค่าว่างไว้ก่อน
+    # เพื่อให้ place_image_or_icon() เรียก row.get("image_url") ได้เสมอ
+    if "image_url" not in df.columns:
+        df["image_url"] = ""
+
     df = df.dropna(subset=["name", "cost", "duration_days", "review_score"])
     df["activities"] = df["activities"].apply(lambda s: [a.strip() for a in str(s).split(",")])
     df["travel_style"] = df["travel_style"].apply(lambda s: [a.strip() for a in str(s).split(",")])
@@ -237,6 +267,7 @@ def recommend(df, selected_interests, budget_per_person, available_days, provinc
         df = df[df["province"] == province_filter]
     if df.empty:
         return df
+
     scores = df.apply(
         lambda r: calculate_score(r, selected_interests, budget_per_person, available_days),
         axis=1, result_type="expand",
@@ -287,6 +318,7 @@ def screen_home():
 
 def screen_form(df):
     st.title("กรอกข้อมูลความต้องการของคุณ")
+
     provinces = ["ทั้งหมด"] + sorted(df["province"].unique().tolist())
     province_filter = st.selectbox("จังหวัด / พื้นที่ที่ต้องการเที่ยว", provinces)
 
@@ -320,6 +352,7 @@ def screen_form(df):
 
 def screen_results():
     st.title("ผลการแนะนำสถานที่ท่องเที่ยว")
+
     results = st.session_state.get("results")
     user_input = st.session_state.get("user_input", {})
 
@@ -389,6 +422,7 @@ def screen_detail():
 
     st.title(place["name"])
     st.caption(f"{place['province']} • ประเภท: {place['type']}")
+
     place_image_or_icon(place, height_px=320)
 
     col1, col2 = st.columns(2)
@@ -419,6 +453,7 @@ def screen_detail():
 
 def main():
     st.set_page_config(page_title="TravelMatch 🧭", page_icon="🧭")
+
     if "page" not in st.session_state:
         st.session_state.page = "home"
 
