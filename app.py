@@ -214,12 +214,12 @@ def place_image_or_icon(row, height_px=160):
             pass
 
     icon = TYPE_ICON.get(row["type"], TYPE_ICON["default"])
-        color = TYPE_COLOR.get(row["type"], TYPE_COLOR["default"])
-        st.markdown(
-            f"<div style='font-size:{int(height_px*0.4)}px;text-align:center;"
-            f"padding:{int(height_px*0.15)}px 0;background:{color};border-radius:14px;'>{icon}</div>",
-            unsafe_allow_html=True,
-        )
+    color = TYPE_COLOR.get(row["type"], TYPE_COLOR["default"])
+    st.markdown(
+        f"<div style='font-size:{int(height_px*0.4)}px;text-align:center;"
+        f"padding:{int(height_px*0.15)}px 0;background:{color};border-radius:14px;'>{icon}</div>",
+        unsafe_allow_html=True,
+    )
 
 
 # ----------------------------------------------------------------------------
