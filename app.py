@@ -22,12 +22,27 @@ TravelMatch 🧭 (Static / CSV Edition — ตรงตามรายงาน�
 แล้วระบบจะใช้ลิงก์นั้นโดยตรงแทนการค้นหาออนไลน์
 """
 
+from pathlib import Path
+
 import pandas as pd
 import requests
 import streamlit as st
 
 TOP_N = 5
-DATA_FILE = "travel_data.csv"
+
+# รองรับทั้งไฟล์เดิมและไฟล์ที่เติมรูปภาพแล้ว
+DATA_FILE_CANDIDATES = [
+    "travel_data_with_images.csv",
+    "data/travel_data_with_images.csv",
+    "travel_data.csv",
+    "data/travel_data.csv",
+]
+
+def get_data_file():
+    for path in DATA_FILE_CANDIDATES:
+        if Path(path).exists():
+            return path
+    return DATA_FILE_CANDIDATES[0]
 
 INTEREST_OPTIONS = [
     "ธรรมชาติ", "ทะเล / ชายหาด", "ประวัติศาสตร์ / วัฒนธรรม",
@@ -175,15 +190,30 @@ def place_image_or_icon(row, height_px=160):
     ไม่ต้องไปค้นหาออนไลน์ให้เสียเวลา/มีโอกาสผิดพลาด
     """
     manual_url = row.get("image_url") if hasattr(row, "get") else None
+    image_url = None
+
     if isinstance(manual_url, str) and manual_url.strip():
         image_url = manual_url.strip()
-    else:
+
+        # ทดสอบว่า URL รูปภาพที่ใส่เองเปิดได้หรือไม่
+        try:
+            test = requests.get(image_url, timeout=8, stream=True)
+            test.raise_for_status()
+        except Exception:
+            image_url = None
+
+    # ถ้าลิงก์ใน CSV ใช้ไม่ได้ ให้ค้นหา Wikipedia / Wikimedia / Openverse ต่อ
+    if not image_url:
         image_url = fetch_place_image(row["name"], row.get("province", ""))
 
     if image_url:
-        st.image(image_url, use_container_width=True)
-    else:
-        icon = TYPE_ICON.get(row["type"], TYPE_ICON["default"])
+        try:
+            st.image(image_url, use_container_width=True)
+            return
+        except Exception:
+            pass
+
+    icon = TYPE_ICON.get(row["type"], TYPE_ICON["default"])
         color = TYPE_COLOR.get(row["type"], TYPE_COLOR["default"])
         st.markdown(
             f"<div style='font-size:{int(height_px*0.4)}px;text-align:center;"
@@ -197,7 +227,7 @@ def place_image_or_icon(row, height_px=160):
 # ----------------------------------------------------------------------------
 @st.cache_data(show_spinner=False)
 def load_data():
-    df = pd.read_csv(DATA_FILE)
+    df = pd.read_csv(get_data_file())
 
     # ตรวจสอบความถูกต้องของข้อมูลก่อนนำไปประมวลผล (ตาม 3.8 ข้อ 2)
     required_cols = [
