@@ -31,6 +31,8 @@ import streamlit as st
 
 TOP_N = 5
 DATA_FILE_CANDIDATES = [
+    "travel_data_unique_images.csv",
+    "data/travel_data_unique_images.csv",
     "travel_data_final.csv",
     "data/travel_data_final.csv",
     "travel_data_with_images.csv",
@@ -223,26 +225,29 @@ def _cached_image_bytes(url: str):
 
 
 def place_image_or_icon(row, height_px=160):
-    """ใช้รูปที่กำหนดใน CSV/override ก่อนเสมอ
-    ถ้า URL ใช้ไม่ได้จึงค่อยค้นหารูปออนไลน์
+    """แสดงรูปของสถานที่โดยไม่ใช้ URL ซ้ำกันในผลลัพธ์ชุดเดียว
+    ถ้ารูปใน CSV ใช้ไม่ได้ จึงค่อยค้นหารูปออนไลน์ที่ตรงกับชื่อสถานที่
     """
     name = str(row["name"]).strip()
     province = str(row.get("province", "")).strip()
 
+    # เก็บ URL ที่เคยใช้แล้วใน session เพื่อป้องกันภาพซ้ำข้ามการ์ด
+    if "used_image_urls" not in st.session_state:
+        st.session_state.used_image_urls = set()
+
     candidates = []
 
-    # 1) Exact override ในโค้ด
-    override = MANUAL_IMAGE_OVERRIDES.get(name)
-    if isinstance(override, str) and override.strip():
-        candidates.append(override.strip())
-
-    # 2) image_url จาก CSV
+    # 1) image_url จาก CSV (ไฟล์ใหม่ถูกเตรียมให้แต่ละสถานที่มี URL ไม่ซ้ำกัน)
     manual_url = row.get("image_url") if hasattr(row, "get") else None
     if isinstance(manual_url, str) and manual_url.strip():
         candidates.append(manual_url.strip())
 
-    # 3) ค้นหาออนไลน์เฉพาะเมื่อ 1-2 ใช้ไม่ได้
-    # ใช้ฟังก์ชันเดิมของโปรเจกต์ที่ค้นหา Wikipedia -> Wikimedia -> Openverse
+    # 2) override เฉพาะสถานที่ (ใช้เมื่อจำเป็นจริง ๆ)
+    override = MANUAL_IMAGE_OVERRIDES.get(name)
+    if isinstance(override, str) and override.strip():
+        candidates.append(override.strip())
+
+    # 3) ค้นหาออนไลน์เป็น fallback เท่านั้น
     try:
         found = fetch_place_image(name, province)
         if found:
@@ -250,26 +255,32 @@ def place_image_or_icon(row, height_px=160):
     except Exception:
         pass
 
-    # ตัด URL ซ้ำ
+    # ตัด URL ซ้ำและ URL ที่เคยถูกใช้ไปแล้ว
     unique = []
     seen = set()
     for url in candidates:
-        if url and url not in seen:
-            seen.add(url)
-            unique.append(url)
+        if not url or url in seen or url in st.session_state.used_image_urls:
+            continue
+        seen.add(url)
+        unique.append(url)
 
     for url in unique:
         image_bytes = _cached_image_bytes(url)
         if image_bytes:
+            st.session_state.used_image_urls.add(url)
             st.image(BytesIO(image_bytes), use_container_width=True)
             return
 
-    # ไม่มีรูปที่ใช้ได้เลย จึงค่อยใช้ไอคอน
+    # ไม่มีรูปที่ใช้ได้: ใช้การ์ดสำรองที่มีชื่อสถานที่ ไม่หยิบรูปจากสถานที่อื่นมาซ้ำ
     icon = TYPE_ICON.get(row["type"], TYPE_ICON["default"])
     color = TYPE_COLOR.get(row["type"], TYPE_COLOR["default"])
     st.markdown(
-        f"<div style='font-size:{int(height_px*0.4)}px;text-align:center;"
-        f"padding:{int(height_px*0.15)}px 0;background:{color};border-radius:14px;'>{icon}</div>",
+        f"<div style='height:{height_px}px;display:flex;flex-direction:column;"
+        f"align-items:center;justify-content:center;background:{color};border-radius:14px;"
+        f"text-align:center;'>"
+        f"<div style='font-size:{int(height_px*0.28)}px'>{icon}</div>"
+        f"<div style='font-size:14px;font-weight:700;padding:6px 12px;'>{name}</div>"
+        f"</div>",
         unsafe_allow_html=True,
     )
 
@@ -419,6 +430,8 @@ def screen_form(df):
         if results.empty:
             st.warning("ไม่พบสถานที่ที่ตรงกับเงื่อนไข ลองเปลี่ยนจังหวัด/ประเภทสถานที่")
             return
+        # เริ่มชุดผลลัพธ์ใหม่ จึงอนุญาตให้ใช้รูปจากชุดใหม่ได้อีกครั้ง
+        st.session_state.used_image_urls = set()
         st.session_state.results = results
         st.session_state.user_input = {
             "province_filter": province_filter, "budget": budget, "days": days,
