@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 """
 TravelMatch 🧭 (Static / CSV Edition — ตรงตามรายงานบทที่ 3-4, ไม่ใช้ข้อมูลเรียลไทม์)
-
 ระบบแนะนำสถานที่ท่องเที่ยวที่เหมาะสมกับงบประมาณ ระยะเวลา และความสนใจของผู้ใช้
 อ่านข้อมูลสถานที่จาก travel_data.csv (สร้างโดย generate_data.py) ตามเครื่องมือที่ระบุใน 3.7
 (Python, Pandas, NumPy, Streamlit, CSV) — ไม่มีการเชื่อมต่ออินเทอร์เน็ต/API ภายนอกใดๆ
@@ -26,7 +25,9 @@ INTEREST_OPTIONS = [
     "ธรรมชาติ", "ทะเล / ชายหาด", "ประวัติศาสตร์ / วัฒนธรรม",
     "วัด / ศาสนสถาน", "ช้อปปิ้ง / ไลฟ์สไตล์", "สวนสนุก / กิจกรรม",
 ]
+
 TRAVEL_STYLE_OPTIONS = ["พักผ่อน", "ผจญภัย", "ครอบครัว", "ถ่ายภาพ"]
+
 ACTIVITY_OPTIONS = [
     "เดินป่า/เดินเล่น", "ถ่ายภาพ", "ปิกนิก", "เล่นน้ำ", "พักผ่อน",
     "ชมวัฒนธรรม", "ไหว้พระ", "ช้อปปิ้ง", "เครื่องเล่น/ผจญภัย",
@@ -50,12 +51,52 @@ WIKI_LANGS = ["th", "en"]
 
 
 @st.cache_data(ttl=604800, show_spinner=False)
-def fetch_place_image(name: str):
+def fetch_place_image(name: str, lat: float = None, lon: float = None):
     """
-    ดึงรูปภาพจริงของสถานที่จาก Wikipedia (ค้นหาด้วยชื่อสถานที่) — เป็นจุดเชื่อมต่อ
-    อินเทอร์เน็ตจุดเดียวในแอป ใช้แค่หารูปภาพประกอบเท่านั้น ข้อมูลสถานที่/คะแนนยังคง
-    เป็นข้อมูลนิ่งจาก travel_data.csv เหมือนเดิมทุกส่วน หากดึงไม่ได้จะ fallback เป็นไอคอนแทน
+    ดึงรูปภาพจริงของสถานที่ — ลองหลายวิธีเรียงตามความแม่นยำ เพื่อให้ได้รูปครบทุกสถานที่
+    มากที่สุดเท่าที่จะทำได้ (จุดเชื่อมต่ออินเทอร์เน็ตเดียวในแอป ใช้แค่หารูปภาพประกอบเท่านั้น
+    ข้อมูลสถานที่/คะแนนยังคงเป็นข้อมูลนิ่งจาก travel_data.csv เหมือนเดิมทุกส่วน):
+
+    1) ค้นหาบทความ Wikipedia ที่อยู่ใกล้พิกัด (lat, lon) ของสถานที่ — แม่นยำที่สุด
+       เพราะอิงจากตำแหน่งจริง ไม่ใช่การจับคู่ชื่อ ใช้ได้ดีแม้สถานที่นั้นไม่มีบทความของตัวเอง
+       (เช่น ห้าง สวนสัตว์เล็กๆ จุดดำน้ำ) เพราะจะดึงรูปจากบทความที่อยู่ใกล้ที่สุดแทน
+    2) ค้นหาบทความ Wikipedia จากชื่อสถานที่โดยตรง (ภาษาไทยก่อน แล้วอังกฤษ)
+    3) ค้นหารูปภาพจาก Wikimedia Commons โดยตรงด้วยชื่อสถานที่
+    หากหาไม่ได้เลยทั้ง 3 วิธี จะ fallback เป็นไอคอนสีพาสเทลแทน (place_image_or_icon)
     """
+    # 1) Geosearch ตามพิกัดจริง — วิธีที่แม่นยำและครอบคลุมที่สุดสำหรับสถานที่ทางภูมิศาสตร์
+    if lat is not None and lon is not None:
+        for lang in WIKI_LANGS:
+            try:
+                resp = requests.get(
+                    f"https://{lang}.wikipedia.org/w/api.php",
+                    params={
+                        "action": "query",
+                        "generator": "geosearch",
+                        "ggscoord": f"{lat}|{lon}",
+                        "ggsradius": 5000,
+                        "ggslimit": 8,
+                        "prop": "pageimages",
+                        "piprop": "thumbnail",
+                        "pithumbsize": 500,
+                        "format": "json",
+                    },
+                    headers=WIKI_HEADERS, timeout=8,
+                )
+                resp.raise_for_status()
+                pages = resp.json().get("query", {}).get("pages", {})
+                ordered = sorted(
+                    pages.values(),
+                    key=lambda p: p.get("dist", 1e9) if isinstance(p.get("dist"), (int, float)) else 1e9,
+                )
+                for page in ordered:
+                    thumb = page.get("thumbnail", {})
+                    if thumb.get("source"):
+                        return thumb["source"]
+            except Exception:
+                continue
+
+    # 2) ค้นหาจากชื่อสถานที่โดยตรง (Wikipedia search + summary) — วิธีเดิม
     for lang in WIKI_LANGS:
         try:
             search_resp = requests.get(
@@ -80,12 +121,42 @@ def fetch_place_image(name: str):
                 return thumb["source"]
         except Exception:
             continue
+
+    # 3) ค้นหาโดยตรงจาก Wikimedia Commons — ครอบคลุมสถานที่ที่ไม่มีบทความ Wikipedia เป็นของตัวเอง
+    #    แต่มีรูปภาพอยู่ใน Commons (เช่น ห้างสรรพสินค้า จุดกิจกรรม สถานที่ท่องเที่ยวเล็กๆ)
+    try:
+        resp = requests.get(
+            "https://commons.wikimedia.org/w/api.php",
+            params={
+                "action": "query",
+                "generator": "search",
+                "gsrsearch": f"{name} Thailand",
+                "gsrnamespace": 6,
+                "gsrlimit": 3,
+                "prop": "imageinfo",
+                "iiprop": "url",
+                "iiurlwidth": 500,
+                "format": "json",
+            },
+            headers=WIKI_HEADERS, timeout=8,
+        )
+        resp.raise_for_status()
+        pages = resp.json().get("query", {}).get("pages", {})
+        for page in pages.values():
+            infos = page.get("imageinfo", [])
+            if infos and infos[0].get("thumburl"):
+                return infos[0]["thumburl"]
+    except Exception:
+        pass
+
     return None
 
 
 def place_image_or_icon(row, height_px=160):
     """แสดงรูปภาพจริงถ้าหาเจอ ไม่งั้นแสดงไอคอนสีพาสเทลตามประเภทสถานที่"""
-    image_url = fetch_place_image(row["name"])
+    lat = row["lat"] if "lat" in row and pd.notna(row["lat"]) else None
+    lon = row["lon"] if "lon" in row and pd.notna(row["lon"]) else None
+    image_url = fetch_place_image(row["name"], lat, lon)
     if image_url:
         st.image(image_url, use_container_width=True)
     else:
@@ -101,7 +172,6 @@ def place_image_or_icon(row, height_px=160):
 # ----------------------------------------------------------------------------
 # ส่วนจัดการข้อมูล (3.8 ข้อ 2): นำข้อมูลสถานที่ท่องเที่ยวจากไฟล์ CSV เข้าสู่ระบบ
 # ----------------------------------------------------------------------------
-
 @st.cache_data(show_spinner=False)
 def load_data():
     df = pd.read_csv(DATA_FILE)
@@ -114,7 +184,6 @@ def load_data():
     if missing:
         st.error(f"ไฟล์ข้อมูลขาดคอลัมน์: {', '.join(missing)}")
         return pd.DataFrame()
-
     df = df.dropna(subset=["name", "cost", "duration_days", "review_score"])
     df["activities"] = df["activities"].apply(lambda s: [a.strip() for a in str(s).split(",")])
     df["travel_style"] = df["travel_style"].apply(lambda s: [a.strip() for a in str(s).split(",")])
@@ -124,7 +193,6 @@ def load_data():
 # ----------------------------------------------------------------------------
 # ส่วนคำนวณคะแนน (3.5 Weighted Scoring: ความสนใจ 40% / งบประมาณ 30% / ระยะเวลา 20% / รีวิว 10%)
 # ----------------------------------------------------------------------------
-
 def calculate_interest_score(row, selected_interests):
     if not selected_interests:
         return 1.0
@@ -205,7 +273,6 @@ def format_duration(days: float) -> str:
 # ----------------------------------------------------------------------------
 # ส่วนติดต่อผู้ใช้ — 4 หน้าจอตามรายงาน 3.6
 # ----------------------------------------------------------------------------
-
 def go_to(page):
     st.session_state.page = page
 
@@ -220,7 +287,6 @@ def screen_home():
 
 def screen_form(df):
     st.title("กรอกข้อมูลความต้องการของคุณ")
-
     provinces = ["ทั้งหมด"] + sorted(df["province"].unique().tolist())
     province_filter = st.selectbox("จังหวัด / พื้นที่ที่ต้องการเที่ยว", provinces)
 
@@ -237,11 +303,9 @@ def screen_form(df):
 
     if st.button("🔎 ค้นหาสถานที่ที่เหมาะกับฉัน", type="primary"):
         results = recommend(df, interests, budget, days, province_filter)
-
         if results.empty:
             st.warning("ไม่พบสถานที่ที่ตรงกับเงื่อนไข ลองเปลี่ยนจังหวัด/ประเภทสถานที่")
             return
-
         st.session_state.results = results
         st.session_state.user_input = {
             "province_filter": province_filter, "budget": budget, "days": days,
@@ -306,8 +370,8 @@ def screen_results():
                 if st.button("ดูรายละเอียด", key=f"detail_{i}"):
                     st.session_state.selected_place = row.to_dict()
                     go_to("detail")
+        st.write("")
 
-    st.write("")
     if st.button("← ย้อนกลับ"):
         go_to("form")
 
@@ -325,7 +389,6 @@ def screen_detail():
 
     st.title(place["name"])
     st.caption(f"{place['province']} • ประเภท: {place['type']}")
-
     place_image_or_icon(place, height_px=320)
 
     col1, col2 = st.columns(2)
