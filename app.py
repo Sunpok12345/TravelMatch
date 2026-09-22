@@ -22,6 +22,7 @@ TravelMatch 🧭 (Static / CSV Edition — ตรงตามรายงาน�
 แล้วระบบจะใช้ลิงก์นั้นโดยตรงแทนการค้นหาออนไลน์
 """
 
+from io import BytesIO
 from pathlib import Path
 
 import pandas as pd
@@ -29,8 +30,6 @@ import requests
 import streamlit as st
 
 TOP_N = 5
-
-# รองรับทั้งไฟล์เดิมและไฟล์ที่เติมรูปภาพแล้ว
 DATA_FILE_CANDIDATES = [
     "travel_data_with_images.csv",
     "data/travel_data_with_images.csv",
@@ -42,7 +41,7 @@ def get_data_file():
     for path in DATA_FILE_CANDIDATES:
         if Path(path).exists():
             return path
-    return DATA_FILE_CANDIDATES[0]
+    return "travel_data.csv"
 
 INTEREST_OPTIONS = [
     "ธรรมชาติ", "ทะเล / ชายหาด", "ประวัติศาสตร์ / วัฒนธรรม",
@@ -72,147 +71,202 @@ WIKI_LANGS = ["th", "en"]
 OPENVERSE_HEADERS = {"User-Agent": "TravelMatchApp/1.0 (educational project; contact: n/a)"}
 
 
-def _wikipedia_image(query: str):
-    """ขั้นตอนที่ 1-2: ค้นหาใน Wikipedia (th แล้วค่อย en) ด้วยคำค้นที่ให้มา"""
+def _wikipedia_images(query: str):
+    """ค้นหารูปจาก Wikipedia หลายผลลัพธ์ แล้วคืน URL ที่เป็นไปได้ทั้งหมด"""
+    urls = []
     for lang in WIKI_LANGS:
         try:
-            search_resp = requests.get(
+            resp = requests.get(
                 f"https://{lang}.wikipedia.org/w/api.php",
-                params={"action": "query", "list": "search", "srsearch": query, "format": "json", "srlimit": 1},
-                headers=WIKI_HEADERS, timeout=8,
+                params={
+                    "action": "query",
+                    "list": "search",
+                    "srsearch": query,
+                    "format": "json",
+                    "srlimit": 5,
+                },
+                headers=WIKI_HEADERS,
+                timeout=10,
             )
-            search_resp.raise_for_status()
-            hits = search_resp.json().get("query", {}).get("search", [])
-            if not hits:
-                continue
-
-            title = hits[0]["title"]
-            summary_resp = requests.get(
-                f"https://{lang}.wikipedia.org/api/rest_v1/page/summary/{requests.utils.quote(title)}",
-                headers=WIKI_HEADERS, timeout=8,
-            )
-            if summary_resp.status_code != 200:
-                continue
-
-            data = summary_resp.json()
-            thumb = data.get("thumbnail") or data.get("originalimage") or {}
-            if thumb.get("source"):
-                return thumb["source"]
+            resp.raise_for_status()
+            hits = resp.json().get("query", {}).get("search", [])
+            for hit in hits:
+                title = hit.get("title")
+                if not title:
+                    continue
+                summary = requests.get(
+                    f"https://{lang}.wikipedia.org/api/rest_v1/page/summary/{requests.utils.quote(title)}",
+                    headers=WIKI_HEADERS,
+                    timeout=10,
+                )
+                if summary.status_code != 200:
+                    continue
+                data = summary.json()
+                thumb = data.get("thumbnail") or data.get("originalimage") or {}
+                source = thumb.get("source")
+                if source and source not in urls:
+                    urls.append(source)
         except Exception:
             continue
-    return None
+    return urls
 
 
-def _wikimedia_commons_image(query: str):
-    """ค้นหาใน Wikimedia Commons โดยตรง (คลังรูปภาพเสรีของ Wikipedia) — เผื่อสถานที่
-    ไม่มีบทความ Wikipedia แต่มีรูปอยู่ใน Commons"""
-    try:
-        resp = requests.get(
-            "https://commons.wikimedia.org/w/api.php",
-            params={
-                "action": "query",
-                "generator": "search",
-                "gsrnamespace": 6,  # ไฟล์ (File:) namespace เท่านั้น
-                "gsrsearch": query,
-                "gsrlimit": 1,
-                "prop": "imageinfo",
-                "iiprop": "url",
-                "iiurlwidth": 800,
-                "format": "json",
-            },
-            headers=WIKI_HEADERS, timeout=8,
-        )
-        resp.raise_for_status()
-        pages = resp.json().get("query", {}).get("pages", {})
-        for page in pages.values():
-            imageinfo = page.get("imageinfo", [])
-            if imageinfo:
-                info = imageinfo[0]
-                return info.get("thumburl") or info.get("url")
-    except Exception:
-        pass
-    return None
+def _wikimedia_commons_images(query: str):
+    """ค้นหารูปใน Wikimedia Commons หลายรายการ"""
+    urls = []
+    queries = [query]
+    # ช่วยกรณีคำค้นที่มีจังหวัดทำให้ผลลัพธ์หาไม่เจอ
+    if " " in query:
+        queries.append(query.rsplit(" ", 1)[0])
+
+    for q in queries:
+        try:
+            resp = requests.get(
+                "https://commons.wikimedia.org/w/api.php",
+                params={
+                    "action": "query",
+                    "generator": "search",
+                    "gsrnamespace": 6,
+                    "gsrsearch": q,
+                    "gsrlimit": 8,
+                    "prop": "imageinfo",
+                    "iiprop": "url",
+                    "iiurlwidth": 1000,
+                    "format": "json",
+                },
+                headers=WIKI_HEADERS,
+                timeout=10,
+            )
+            resp.raise_for_status()
+            pages = resp.json().get("query", {}).get("pages", {})
+            for page in pages.values():
+                info = (page.get("imageinfo") or [{}])[0]
+                source = info.get("thumburl") or info.get("url")
+                if source and source not in urls:
+                    urls.append(source)
+        except Exception:
+            continue
+    return urls
 
 
-def _openverse_image(query: str):
-    """ขั้นตอนที่ 4 (fallback สุดท้าย): Openverse API — คลังรูปลิขสิทธิ์เสรีที่รวมจาก
-    Flickr, Europeana ฯลฯ ไม่ต้องใช้ API key สำหรับการค้นหาพื้นฐาน"""
+def _openverse_images(query: str):
+    """ค้นหา Openverse หลายภาพ"""
+    urls = []
     try:
         resp = requests.get(
             "https://api.openverse.org/v1/images/",
-            params={"q": query, "page_size": 1, "license_type": "all-cc"},
-            headers=OPENVERSE_HEADERS, timeout=8,
+            params={"q": query, "page_size": 8, "license_type": "all-cc"},
+            headers=OPENVERSE_HEADERS,
+            timeout=10,
         )
         resp.raise_for_status()
-        results = resp.json().get("results", [])
-        if results:
-            return results[0].get("thumbnail") or results[0].get("url")
+        for item in resp.json().get("results", []):
+            source = item.get("thumbnail") or item.get("url")
+            if source and source not in urls:
+                urls.append(source)
     except Exception:
         pass
+    return urls
+
+
+@st.cache_data(ttl=604800, show_spinner=False)
+def _download_image(url: str):
+    """ดาวน์โหลดรูปมาเป็น bytes เพื่อไม่ให้ browser ไปเปิด URL ภายนอกโดยตรง"""
+    if not isinstance(url, str) or not url.strip():
+        return None
+
+    try:
+        resp = requests.get(
+            url.strip(),
+            headers={
+                "User-Agent": "TravelMatchApp/1.0 (educational project)",
+                "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
+            },
+            timeout=12,
+            allow_redirects=True,
+        )
+        resp.raise_for_status()
+
+        content_type = (resp.headers.get("content-type") or "").lower()
+        content = resp.content
+
+        # รับรูปที่เซิร์ฟเวอร์ไม่ได้ตั้ง content-type ถูกต้องด้วยการตรวจ magic bytes
+        looks_like_image = (
+            content_type.startswith("image/")
+            or content.startswith(b"\xFF\xD8\xFF")       # JPEG
+            or content.startswith(b"\x89PNG")             # PNG
+            or content.startswith(b"RIFF") and b"WEBP" in content[:16]  # WEBP
+            or content.startswith(b"GIF8")                # GIF
+        )
+
+        if looks_like_image and len(content) > 500:
+            return content
+    except Exception:
+        return None
+
     return None
 
 
 @st.cache_data(ttl=604800, show_spinner=False)
-def fetch_place_image(name: str, province: str = ""):
-    """
-    ดึงรูปภาพจริงของสถานที่ ลำดับการค้นหา:
-      1-2) Wikipedia (th แล้ว en) ค้นหาด้วย "ชื่อสถานที่ + จังหวัด" เพื่อลดโอกาสจับคู่ผิด
-           (เช่น ชื่อสถานที่ซ้ำกันคนละจังหวัด)
-      3)   Wikimedia Commons โดยตรง เผื่อสถานที่ไม่มีบทความ Wikipedia แต่มีรูปอยู่ใน Commons
-      4)   Openverse API เป็น fallback สุดท้าย ก่อนไปใช้ไอคอนแทน
+def fetch_place_image_urls(name: str, province: str = ""):
+    """คืนลิสต์ URL รูปภาพจากหลายแหล่ง เรียงจากแหล่งที่ค้นหาแม่นที่สุด"""
+    name = str(name).strip()
+    province = str(province).strip()
 
-    ครอบคลุมสถานที่ทั่วไปอย่างห้าง ส่วนตัว ตลาด หรือสวนสนุกได้มากกว่าเดิม แต่ระบบภายนอก
-    ไม่รับประกันผลลัพธ์ 100% เสมอไป — หากต้องการรูปที่แม่นยำแน่นอน ให้ใส่ image_url ใน
-    travel_data.csv สำหรับแถวนั้นแทน (ดู place_image_or_icon ด้านล่าง)
-    """
-    query = f"{name} {province}".strip() if province else name
+    queries = []
+    if province:
+        queries.extend([
+            f"{name} {province}",
+            f'"{name}" {province}',
+            name,
+        ])
+    else:
+        queries.extend([name, f'"{name}"'])
 
-    image_url = _wikipedia_image(query)
-    if image_url:
-        return image_url
+    candidates = []
 
-    image_url = _wikimedia_commons_image(query)
-    if image_url:
-        return image_url
+    for query in queries:
+        # 1) Wikipedia
+        candidates.extend(_wikipedia_images(query))
 
-    image_url = _openverse_image(query)
-    if image_url:
-        return image_url
+        # 2) Wikimedia Commons
+        candidates.extend(_wikimedia_commons_images(query))
 
-    return None
+        # 3) Openverse
+        candidates.extend(_openverse_images(query))
+
+    # ตัดซ้ำโดยคงลำดับเดิม
+    unique = []
+    seen = set()
+    for url in candidates:
+        if url not in seen:
+            seen.add(url)
+            unique.append(url)
+    return unique
 
 
 def place_image_or_icon(row, height_px=160):
-    """แสดงรูปภาพจริงถ้าหาเจอ ไม่งั้นแสดงไอคอนสีพาสเทลตามประเภทสถานที่
-
-    ลำดับความสำคัญ: ถ้าใน travel_data.csv มีคอลัมน์ image_url และมีค่าสำหรับแถวนี้
-    (ผู้ดูแลเลือกใส่ลิงก์เอง เพื่อการันตีว่าตรงกับสถานที่ 100%) จะใช้ลิงก์นั้นก่อนเสมอ
-    ไม่ต้องไปค้นหาออนไลน์ให้เสียเวลา/มีโอกาสผิดพลาด
+    """แสดงรูปจริง โดยดาวน์โหลดจาก URL มาเป็น bytes ก่อน
+    ถ้าลิงก์ใน CSV ใช้ไม่ได้ จะค้นหาแหล่งอื่นอัตโนมัติ
     """
+    name = row["name"]
+    province = row.get("province", "")
     manual_url = row.get("image_url") if hasattr(row, "get") else None
-    image_url = None
 
+    # ค้นหารูปออนไลน์ของสถานที่ก่อน เพื่อให้ได้รูปที่ตรงกับชื่อจริง
+    candidates = fetch_place_image_urls(name, province)
+
+    # image_url ใน CSV เป็น fallback สุดท้าย
     if isinstance(manual_url, str) and manual_url.strip():
-        image_url = manual_url.strip()
+        candidates.append(manual_url.strip())
 
-        # ทดสอบว่า URL รูปภาพที่ใส่เองเปิดได้หรือไม่
-        try:
-            test = requests.get(image_url, timeout=8, stream=True)
-            test.raise_for_status()
-        except Exception:
-            image_url = None
-
-    # ถ้าลิงก์ใน CSV ใช้ไม่ได้ ให้ค้นหา Wikipedia / Wikimedia / Openverse ต่อ
-    if not image_url:
-        image_url = fetch_place_image(row["name"], row.get("province", ""))
-
-    if image_url:
-        try:
-            st.image(image_url, use_container_width=True)
+    for url in candidates:
+        image_bytes = _download_image(url)
+        if image_bytes:
+            st.image(BytesIO(image_bytes), use_container_width=True)
             return
-        except Exception:
-            pass
 
+    # กรณีไม่มีรูปจริงเลย ให้แสดงไอคอนแทนอย่างชัดเจน
     icon = TYPE_ICON.get(row["type"], TYPE_ICON["default"])
     color = TYPE_COLOR.get(row["type"], TYPE_COLOR["default"])
     st.markdown(
