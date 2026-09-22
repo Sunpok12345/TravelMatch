@@ -31,6 +31,8 @@ import streamlit as st
 
 TOP_N = 5
 DATA_FILE_CANDIDATES = [
+    "travel_data_final.csv",
+    "data/travel_data_final.csv",
     "travel_data_with_images.csv",
     "data/travel_data_with_images.csv",
     "travel_data.csv",
@@ -70,203 +72,199 @@ WIKI_HEADERS = {"User-Agent": "TravelMatchApp/1.0 (educational project; contact:
 WIKI_LANGS = ["th", "en"]
 OPENVERSE_HEADERS = {"User-Agent": "TravelMatchApp/1.0 (educational project; contact: n/a)"}
 
+# ลิงก์รูปที่ตรวจสอบ/กำหนดเองสำหรับสถานที่สำคัญ
+MANUAL_IMAGE_OVERRIDES = {'อุทยานแห่งชาติเขาสก': 'https://mpics-cdn-acc.mgronline.com/pics/Images/563000010828201.JPEG', 'น้ำตกหงาว': 'https://ak-d.tripcdn.com/images/1mi5f2224trjs7e4hBB6A_W_200_0_R5_Q50.jpg?proc=source%2Ftrip', 'เขาหลัก': 'https://cdn.sanity.io/images/nxpteyfv/goguides/0d52b27b06e855cb044e18a56ed507182fb491b3-1600x1066.jpg?auto=format&fit=max&fp-x=0.5&fp-y=0.5&w=100', 'ป่าพรุโต๊ะแดง': 'https://www.puyok.go.th/images/CHATCHAI/TT/pu3.JPEG', 'เขาพนมเบญจา': 'https://th.readme.me/f/39722/cover.jpg', 'อุทยานแห่งชาติแหลมสน': 'https://cbtthailand.dasta.or.th/upload-file-api/Resources/RelateAttraction/Images/RAT850088/1.jpeg', 'เกาะพีพี': 'https://aws-tiqets-cdn.imgix.net/images/content/1f9dead84fe44cd68db2647cb0d4be56.jpeg', 'หาดป่าตอง': '', 'อ่าวนาง': 'https://www.weseektravel.com/wp-content/uploads/2023/06/where-to-stay-ao-nang-1.jpg', 'หาดไร่เลย์': 'https://cdn.audleytravel.com/1600/1144/60/16017015-railay-beach-krabi.jpg', 'เกาะหลีเป๊ะ': '', 'เกาะสมุย': 'https://cdn.sanity.io/images/nxpteyfv/goguides/1cce7443a016225121e8412f64fe678d919426fc-1600x1067.jpg', 'เกาะพะงัน': 'https://cdn.wochenblitz.com/2026/06/koh-phangan-expats-fordern-aus-fuer-thai-zeremonien-featured.jpg', 'หาดนราทัศน์': '', 'เกาะยาวน้อย': 'https://content.r9cdn.net/rimg/dimg/08/e7/5b520c3d-city-58036-1696ddd3567.jpg?crop=true&height=768&width=1366&xhint=2249&yhint=1452', 'หาดคึกคัก': 'https://f.ptcdn.info/873/016/000/1395204530-2377JPG-o.jpg', 'ย่านเมืองเก่าภูเก็ต': 'https://i0.wp.com/thailandgaho.com/wp-content/uploads/2020/04/08_DSC02050.jpg?resize=940%2C627&ssl=1', 'พิพิธภัณฑสถานแห่งชาตินครศรีธรรมราช': 'https://paiteawgun.com/blog/wp-content/uploads/2013/10/%E0%B8%9E%E0%B8%B4%E0%B8%9E%E0%B8%B4%E0%B8%98%E0%B8%A0%E0%B8%B1%E0%B8%93%E0%B8%91%E0%B8%AA%E0%B8%96%E0%B8%B2%E0%B8%99%E0%B9%81%E0%B8%AB%E0%B9%88%E0%B8%87%E0%B8%8A%E0%B8%B2%E0%B8%95%E0%B8%B4%E0%B8%34010.jpg', 'ย่านเมืองเก่าสงขลา': 'https://i.pinimg.com/originals/14/1f/95/141f955f6ae9c8dd18f2c099a152bea5.jpg', 'ป้อมปืนใหญ่ภูเก็ต': '', 'วัดพระมหาธาตุวรมหาวิหาร': 'https://img.wongnai.com/p/1920x0/2019/05/26/4a6a314b98004f10ac28b366eaaccdb3.jpg', 'วัดฉลอง': 'https://www.holidify.com/images/cmsuploads/compressed/Phuket_Thailand_Wat-Chalong-02_20190916180534.jpg', 'วัดถ้ำเสือ': 'https://cdn.prod.rexby.com/image/6c0f40b4fbb944159beedd4300c3152b?format=webp&height=1350&width=1080', 'พระใหญ่ภูเก็ต (บิ๊กพุทธ)': 'https://i0.wp.com/content.phuket101.net/wp-content/uploads/20200530214142/big-buddha-2019.jpg?ssl=1', 'มัสยิดกลางประจำจังหวัดปัตตานี': 'https://news.muslimthaipost.com/uploads/2019/11/06/img/img_157302201322.jpg', 'มัสยิดกลางสงขลา': 'https://f.tpkcdn.com/review-source/54135e08-9eab-46b1-2ef8-579617b3621d.jpg', 'เซ็นทรัล ภูเก็ต ฟลอเรสต้า': 'https://getoccupi.com/cdn-cgi/image/width%3D1200%2Cquality%3D85%2Cformat%3Dauto/https%3A/static.getoccupi.com/uploads/mall_photo/photo/12747/662bcecd47815fd979c94d4e87a165a590a4e413-1600x1066.jpg', 'ตลาดใหญ่หาดใหญ่': 'https://dynamic-media-cdn.tripadvisor.com/media/photo-o/16/d7/5b/d3/kim-yong-market.jpg?h=400&s=1&w=700', 'ถนนคนเดินภูเก็ต (ตลาดหลาดใหญ่)': 'https://i0.wp.com/thailandgaho.com/wp-content/uploads/2020/04/08_DSC02050.jpg?resize=940%2C627&ssl=1', 'เซ็นทรัล เฟสติวัล หาดใหญ่': 'https://ak-d.tripcdn.com/images/1mi3w224x90udo3d5B41B.jpg?proc=source%2Ftrip', 'ภูเก็ตแฟนตาซี': 'https://bluegaxy.com/image/cache/catalog/Show/dzvcxbrsefhdu1rtjkn9.jpg', 'สงขลาซู': 'https://dynamic-media-cdn.tripadvisor.com/media/photo-o/1c/39/bb/3c/songkhla-zoo.jpg?h=400&s=1&w=700', 'ดำน้ำดูปะการังเกาะราชา': 'https://i.world-tourism.org/m/racha-island-snorkeling-tour-by-speedboat-from-phuket-d349-110534P184-1.jpg', 'บลูทรี ภูเก็ต': 'https://media3.thrillophilia.com/filestore/ghuweaqb1dw6ih06xtu3v9bpdbf0_blue-tree-water-park.jpg'}
 
-def _wikipedia_images(query: str):
-    """ค้นหารูปจาก Wikipedia หลายผลลัพธ์ แล้วคืน URL ที่เป็นไปได้ทั้งหมด"""
-    urls = []
+
+def _wikipedia_image(query: str):
+    """ขั้นตอนที่ 1-2: ค้นหาใน Wikipedia (th แล้วค่อย en) ด้วยคำค้นที่ให้มา"""
     for lang in WIKI_LANGS:
         try:
-            resp = requests.get(
+            search_resp = requests.get(
                 f"https://{lang}.wikipedia.org/w/api.php",
-                params={
-                    "action": "query",
-                    "list": "search",
-                    "srsearch": query,
-                    "format": "json",
-                    "srlimit": 5,
-                },
-                headers=WIKI_HEADERS,
-                timeout=10,
+                params={"action": "query", "list": "search", "srsearch": query, "format": "json", "srlimit": 1},
+                headers=WIKI_HEADERS, timeout=8,
             )
-            resp.raise_for_status()
-            hits = resp.json().get("query", {}).get("search", [])
-            for hit in hits:
-                title = hit.get("title")
-                if not title:
-                    continue
-                summary = requests.get(
-                    f"https://{lang}.wikipedia.org/api/rest_v1/page/summary/{requests.utils.quote(title)}",
-                    headers=WIKI_HEADERS,
-                    timeout=10,
-                )
-                if summary.status_code != 200:
-                    continue
-                data = summary.json()
-                thumb = data.get("thumbnail") or data.get("originalimage") or {}
-                source = thumb.get("source")
-                if source and source not in urls:
-                    urls.append(source)
+            search_resp.raise_for_status()
+            hits = search_resp.json().get("query", {}).get("search", [])
+            if not hits:
+                continue
+
+            title = hits[0]["title"]
+            summary_resp = requests.get(
+                f"https://{lang}.wikipedia.org/api/rest_v1/page/summary/{requests.utils.quote(title)}",
+                headers=WIKI_HEADERS, timeout=8,
+            )
+            if summary_resp.status_code != 200:
+                continue
+
+            data = summary_resp.json()
+            thumb = data.get("thumbnail") or data.get("originalimage") or {}
+            if thumb.get("source"):
+                return thumb["source"]
         except Exception:
             continue
-    return urls
+    return None
 
 
-def _wikimedia_commons_images(query: str):
-    """ค้นหารูปใน Wikimedia Commons หลายรายการ"""
-    urls = []
-    queries = [query]
-    # ช่วยกรณีคำค้นที่มีจังหวัดทำให้ผลลัพธ์หาไม่เจอ
-    if " " in query:
-        queries.append(query.rsplit(" ", 1)[0])
-
-    for q in queries:
-        try:
-            resp = requests.get(
-                "https://commons.wikimedia.org/w/api.php",
-                params={
-                    "action": "query",
-                    "generator": "search",
-                    "gsrnamespace": 6,
-                    "gsrsearch": q,
-                    "gsrlimit": 8,
-                    "prop": "imageinfo",
-                    "iiprop": "url",
-                    "iiurlwidth": 1000,
-                    "format": "json",
-                },
-                headers=WIKI_HEADERS,
-                timeout=10,
-            )
-            resp.raise_for_status()
-            pages = resp.json().get("query", {}).get("pages", {})
-            for page in pages.values():
-                info = (page.get("imageinfo") or [{}])[0]
-                source = info.get("thumburl") or info.get("url")
-                if source and source not in urls:
-                    urls.append(source)
-        except Exception:
-            continue
-    return urls
+def _wikimedia_commons_image(query: str):
+    """ค้นหาใน Wikimedia Commons โดยตรง (คลังรูปภาพเสรีของ Wikipedia) — เผื่อสถานที่
+    ไม่มีบทความ Wikipedia แต่มีรูปอยู่ใน Commons"""
+    try:
+        resp = requests.get(
+            "https://commons.wikimedia.org/w/api.php",
+            params={
+                "action": "query",
+                "generator": "search",
+                "gsrnamespace": 6,  # ไฟล์ (File:) namespace เท่านั้น
+                "gsrsearch": query,
+                "gsrlimit": 1,
+                "prop": "imageinfo",
+                "iiprop": "url",
+                "iiurlwidth": 800,
+                "format": "json",
+            },
+            headers=WIKI_HEADERS, timeout=8,
+        )
+        resp.raise_for_status()
+        pages = resp.json().get("query", {}).get("pages", {})
+        for page in pages.values():
+            imageinfo = page.get("imageinfo", [])
+            if imageinfo:
+                info = imageinfo[0]
+                return info.get("thumburl") or info.get("url")
+    except Exception:
+        pass
+    return None
 
 
-def _openverse_images(query: str):
-    """ค้นหา Openverse หลายภาพ"""
-    urls = []
+def _openverse_image(query: str):
+    """ขั้นตอนที่ 4 (fallback สุดท้าย): Openverse API — คลังรูปลิขสิทธิ์เสรีที่รวมจาก
+    Flickr, Europeana ฯลฯ ไม่ต้องใช้ API key สำหรับการค้นหาพื้นฐาน"""
     try:
         resp = requests.get(
             "https://api.openverse.org/v1/images/",
-            params={"q": query, "page_size": 8, "license_type": "all-cc"},
-            headers=OPENVERSE_HEADERS,
-            timeout=10,
+            params={"q": query, "page_size": 1, "license_type": "all-cc"},
+            headers=OPENVERSE_HEADERS, timeout=8,
         )
         resp.raise_for_status()
-        for item in resp.json().get("results", []):
-            source = item.get("thumbnail") or item.get("url")
-            if source and source not in urls:
-                urls.append(source)
+        results = resp.json().get("results", [])
+        if results:
+            return results[0].get("thumbnail") or results[0].get("url")
     except Exception:
         pass
-    return urls
+    return None
 
 
 @st.cache_data(ttl=604800, show_spinner=False)
-def _download_image(url: str):
-    """ดาวน์โหลดรูปมาเป็น bytes เพื่อไม่ให้ browser ไปเปิด URL ภายนอกโดยตรง"""
+def fetch_place_image(name: str, province: str = ""):
+    """
+    ดึงรูปภาพจริงของสถานที่ ลำดับการค้นหา:
+      1-2) Wikipedia (th แล้ว en) ค้นหาด้วย "ชื่อสถานที่ + จังหวัด" เพื่อลดโอกาสจับคู่ผิด
+           (เช่น ชื่อสถานที่ซ้ำกันคนละจังหวัด)
+      3)   Wikimedia Commons โดยตรง เผื่อสถานที่ไม่มีบทความ Wikipedia แต่มีรูปอยู่ใน Commons
+      4)   Openverse API เป็น fallback สุดท้าย ก่อนไปใช้ไอคอนแทน
+
+    ครอบคลุมสถานที่ทั่วไปอย่างห้าง ส่วนตัว ตลาด หรือสวนสนุกได้มากกว่าเดิม แต่ระบบภายนอก
+    ไม่รับประกันผลลัพธ์ 100% เสมอไป — หากต้องการรูปที่แม่นยำแน่นอน ให้ใส่ image_url ใน
+    travel_data.csv สำหรับแถวนั้นแทน (ดู place_image_or_icon ด้านล่าง)
+    """
+    query = f"{name} {province}".strip() if province else name
+
+    image_url = _wikipedia_image(query)
+    if image_url:
+        return image_url
+
+    image_url = _wikimedia_commons_image(query)
+    if image_url:
+        return image_url
+
+    image_url = _openverse_image(query)
+    if image_url:
+        return image_url
+
+    return None
+
+
+def _download_image_bytes(url: str):
+    """ดาวน์โหลดรูปจาก URL ให้ Streamlit แสดงเป็น bytes ลดปัญหา hotlink/รูปเสีย"""
     if not isinstance(url, str) or not url.strip():
         return None
-
     try:
         resp = requests.get(
             url.strip(),
             headers={
-                "User-Agent": "TravelMatchApp/1.0 (educational project)",
+                "User-Agent": "Mozilla/5.0 TravelMatch/1.0",
                 "Accept": "image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8",
             },
             timeout=12,
             allow_redirects=True,
         )
         resp.raise_for_status()
-
-        content_type = (resp.headers.get("content-type") or "").lower()
         content = resp.content
-
-        # รับรูปที่เซิร์ฟเวอร์ไม่ได้ตั้ง content-type ถูกต้องด้วยการตรวจ magic bytes
-        looks_like_image = (
-            content_type.startswith("image/")
-            or content.startswith(b"\xFF\xD8\xFF")       # JPEG
-            or content.startswith(b"\x89PNG")             # PNG
-            or content.startswith(b"RIFF") and b"WEBP" in content[:16]  # WEBP
-            or content.startswith(b"GIF8")                # GIF
+        ctype = (resp.headers.get("content-type") or "").lower()
+        is_image = (
+            ctype.startswith("image/")
+            or content.startswith(b"\xff\xd8\xff")
+            or content.startswith(b"\x89PNG")
+            or content.startswith(b"GIF8")
+            or (content.startswith(b"RIFF") and b"WEBP" in content[:16])
         )
-
-        if looks_like_image and len(content) > 500:
+        if is_image and len(content) > 500:
             return content
     except Exception:
-        return None
-
+        pass
     return None
 
 
 @st.cache_data(ttl=604800, show_spinner=False)
-def fetch_place_image_urls(name: str, province: str = ""):
-    """คืนลิสต์ URL รูปภาพจากหลายแหล่ง เรียงจากแหล่งที่ค้นหาแม่นที่สุด"""
-    name = str(name).strip()
-    province = str(province).strip()
-
-    queries = []
-    if province:
-        queries.extend([
-            f"{name} {province}",
-            f'"{name}" {province}',
-            name,
-        ])
-    else:
-        queries.extend([name, f'"{name}"'])
-
-    candidates = []
-
-    for query in queries:
-        # 1) Wikipedia
-        candidates.extend(_wikipedia_images(query))
-
-        # 2) Wikimedia Commons
-        candidates.extend(_wikimedia_commons_images(query))
-
-        # 3) Openverse
-        candidates.extend(_openverse_images(query))
-
-    # ตัดซ้ำโดยคงลำดับเดิม
-    unique = []
-    seen = set()
-    for url in candidates:
-        if url not in seen:
-            seen.add(url)
-            unique.append(url)
-    return unique
+def _cached_image_bytes(url: str):
+    return _download_image_bytes(url)
 
 
 def place_image_or_icon(row, height_px=160):
-    """แสดงรูปจริง โดยดาวน์โหลดจาก URL มาเป็น bytes ก่อน
-    ถ้าลิงก์ใน CSV ใช้ไม่ได้ จะค้นหาแหล่งอื่นอัตโนมัติ
+    """ใช้รูปที่กำหนดใน CSV/override ก่อนเสมอ
+    ถ้า URL ใช้ไม่ได้จึงค่อยค้นหารูปออนไลน์
     """
-    name = row["name"]
-    province = row.get("province", "")
+    name = str(row["name"]).strip()
+    province = str(row.get("province", "")).strip()
+
+    candidates = []
+
+    # 1) Exact override ในโค้ด
+    override = MANUAL_IMAGE_OVERRIDES.get(name)
+    if isinstance(override, str) and override.strip():
+        candidates.append(override.strip())
+
+    # 2) image_url จาก CSV
     manual_url = row.get("image_url") if hasattr(row, "get") else None
-
-    # ค้นหารูปออนไลน์ของสถานที่ก่อน เพื่อให้ได้รูปที่ตรงกับชื่อจริง
-    candidates = fetch_place_image_urls(name, province)
-
-    # image_url ใน CSV เป็น fallback สุดท้าย
     if isinstance(manual_url, str) and manual_url.strip():
         candidates.append(manual_url.strip())
 
+    # 3) ค้นหาออนไลน์เฉพาะเมื่อ 1-2 ใช้ไม่ได้
+    # ใช้ฟังก์ชันเดิมของโปรเจกต์ที่ค้นหา Wikipedia -> Wikimedia -> Openverse
+    try:
+        found = fetch_place_image(name, province)
+        if found:
+            candidates.append(found)
+    except Exception:
+        pass
+
+    # ตัด URL ซ้ำ
+    unique = []
+    seen = set()
     for url in candidates:
-        image_bytes = _download_image(url)
+        if url and url not in seen:
+            seen.add(url)
+            unique.append(url)
+
+    for url in unique:
+        image_bytes = _cached_image_bytes(url)
         if image_bytes:
             st.image(BytesIO(image_bytes), use_container_width=True)
             return
 
-    # กรณีไม่มีรูปจริงเลย ให้แสดงไอคอนแทนอย่างชัดเจน
+    # ไม่มีรูปที่ใช้ได้เลย จึงค่อยใช้ไอคอน
     icon = TYPE_ICON.get(row["type"], TYPE_ICON["default"])
     color = TYPE_COLOR.get(row["type"], TYPE_COLOR["default"])
     st.markdown(
@@ -274,7 +272,6 @@ def place_image_or_icon(row, height_px=160):
         f"padding:{int(height_px*0.15)}px 0;background:{color};border-radius:14px;'>{icon}</div>",
         unsafe_allow_html=True,
     )
-
 
 # ----------------------------------------------------------------------------
 # ส่วนจัดการข้อมูล (3.8 ข้อ 2): นำข้อมูลสถานที่ท่องเที่ยวจากไฟล์ CSV เข้าสู่ระบบ
